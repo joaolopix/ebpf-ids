@@ -8,40 +8,47 @@
 #include <linux/if_packet.h>
 #include <linux/ipv6.h>
 
-
-struct flow_key {
+typedef struct flow_key {
     __u32 src_ip;
     __u32 dst_ip;
     __u16 src_port;
     __u16 dst_port;
     __u16 protocol;
-};
+}flow_key;
 
-struct flow_value {
-    __u64 count;
+typedef struct flow_value {
+    __u64 packet_counter;
     __u64 timestamp;
-};
+    __u64 duration;
+    __u64 transmited_bytes;
+    __u64 flags[6];
+    __u64 scan;
+}flow_value;
 
-struct pkt_data {
-	union {
-		__be32 src;
-		__be32 srcv6[4];
-	};
-	union {
-		__be32 dst;
-		__be32 dstv6[4];
-	};
+typedef struct pkt_data {
+    __be32 src;
+    __be32 dst;
 	__u16 port16[2];
 	__u16 l3_proto;
 	__u16 l4_proto;
 	__u16 data_len;
 	__u16 pkt_len;
 	__u32 seq;
-};
+    bool flags[6];
+}pkt_data;
 
-BPF_TABLE("lru_hash", struct flow_key, struct flow_value, flow_table, 30);
+typedef struct tree_node {
+    int feature;
+    int value;
+    int left;
+    int right;
+} tree_node;
 
-static __always_inline bool parse_udp(void *data, __u64 *offset, void *data_end,struct pkt_data *pkt){
+BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 100);
+BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
+BPF_TABLE("hash", int, int, tree_roots, N_TREES);
+
+static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
 	struct udphdr *udp_header = data + *offset;
     *offset += sizeof(struct tcphdr);
@@ -53,7 +60,7 @@ static __always_inline bool parse_udp(void *data, __u64 *offset, void *data_end,
 	return true;
 }
 
-static __always_inline bool parse_tcp(void *data, __u64 *offset, void *data_end,struct pkt_data *pkt){
+static __always_inline bool parse_tcp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
 	struct tcphdr *tcp_header = data + *offset;
     *offset += sizeof(struct tcphdr);
@@ -63,11 +70,17 @@ static __always_inline bool parse_tcp(void *data, __u64 *offset, void *data_end,
 	pkt->port16[0] = tcp_header->source;
 	pkt->port16[1] = tcp_header->dest;
 	pkt->seq = tcp_header->seq;
+    pkt->flags[0] = tcp_header->urg;
+    pkt->flags[1] = tcp_header->ack;
+    pkt->flags[2] = tcp_header->psh;
+    pkt->flags[3] = tcp_header->rst;
+    pkt->flags[4] = tcp_header->syn;
+    pkt->flags[5] = tcp_header->fin;
 
 	return true;
 }
 
-static __always_inline bool parse_ipv4(void *data, __u64 *offset, void *data_end, struct pkt_data *pkt){
+static __always_inline bool parse_ipv4(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
 	struct iphdr *ipv4_header = data + *offset;
 	*offset += sizeof(struct iphdr);
@@ -81,7 +94,7 @@ static __always_inline bool parse_ipv4(void *data, __u64 *offset, void *data_end
 	return true;
 }
 
-static __always_inline bool parse_ethernet_header(struct pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+static __always_inline bool parse_ethernet_header(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
     struct ethhdr *ethernet_header = data;
     *offset = sizeof(struct ethhdr);
     if (data + *offset > data_end) 
@@ -93,32 +106,37 @@ static __always_inline bool parse_ethernet_header(struct pkt_data *pkt,void *dat
 
 }
 
-static __always_inline bool parse_ip_header(struct pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+static __always_inline bool parse_ip_header(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
 
     if(pkt->l3_proto == ETH_P_IP){
-        
-        if(!parse_ipv4(data,offset,data_end,pkt))
+        if(!parse_ipv4(pkt,data,data_end,offset))
             return false;
     }
-
+    else{
+        return false; // for ipv6
+    }
+    
     return true;
 }
 
-static __always_inline bool parse_l4data(struct pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+static __always_inline bool parse_l4data(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
 
     if(pkt->l4_proto == IPPROTO_TCP){
-        if(!parse_tcp(data,offset,data_end,pkt))
+        if(!parse_tcp(pkt,data,data_end,offset))
             return false;
     }
     else if(pkt->l4_proto == IPPROTO_UDP){
-        if(!parse_tcp(data,offset,data_end,pkt))
+        if(!parse_tcp(pkt,data,data_end,offset))
             return false;
+    }
+    else{
+        return false; // neither TCP or UDP
     }
 
     return true;
 }
 
-static __always_inline bool packet_parser(struct pkt_data *pkt,void *data, void *data_end){
+static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_end){
 
     __u64 offset;
 
@@ -130,38 +148,112 @@ static __always_inline bool packet_parser(struct pkt_data *pkt,void *data, void 
     
     if(!parse_l4data(pkt,data,data_end,&offset))
             return false;
+
+    pkt->pkt_len = data_end - data;
+    pkt->data_len = data_end - data - offset;
     
     return true;
 }
 
+static __always_inline int predict(__u64 duration,__u16 protocol, __u16 dst_port,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
 
-int flow_counter(struct xdp_md *ctx) {
+    int result = 0;
+    int features[6] = {duration,protocol,dst_port,packet_counter,transmited_bytes,current_flags};
+    int j = 0;
+    for (int i = 0; i < N_TREES; i++) {
+        int* current_root = tree_roots.lookup(&j);
+        j++;
+        if(current_root){
+            int current_node = *current_root;
+            for (int d = 0; d < MTD+1; d++){
+                tree_node* node = tree_nodes.lookup(&current_node);
+                if(node){
+                    if(node->feature < sizeof(features)/sizeof(int) && node->feature >= 0){
+                        if (features[node->feature]*10 < node->value) {
+                            current_node = node->left;
+                        } 
+                        else {
+                            current_node = node->right;
+                        }
+                    }
+                    else{
+                        result += node->value;
+                        break;
+                    }
+                }
+                else
+                   continue;;
+            }
+        }
+        else
+            continue;
+            
+    }
+    
+    return result;
+}
 
-    struct flow_key key = {};
+static __always_inline void flow_table_add(pkt_data *pkt){
+    flow_key key = {};
+
+    key.src_ip = pkt->src;
+    key.dst_ip = pkt->dst;
+    key.src_port = pkt->port16[0];
+    key.dst_port = pkt->port16[1];
+    key.protocol = pkt->l4_proto;
+
+    char flags_to_string[6] = {"UAPRSF"};
+
+    flow_value *value = flow_table.lookup(&key);
+    
+    if (value) {
+        value->packet_counter++;
+        value->transmited_bytes += pkt->pkt_len;
+        value->duration += bpf_ktime_get_ns()-value->timestamp;
+        value->timestamp = bpf_ktime_get_ns();
+        int current_flags = 0;
+        for(int i = 0; i < sizeof(value->flags)/sizeof(__u64); i++){
+            if(pkt->flags[i])
+                value->flags[i] = 2;
+            else if(!pkt->flags[i] && value->flags[i] != 2)
+                value->flags[i] = 1;
+            current_flags = current_flags + value->flags[i];
+            current_flags = current_flags * 10;
+        }
+        value->scan = predict(value->duration,key.protocol,key.dst_port,value->packet_counter,value->transmited_bytes,current_flags);
+
+    } 
+    else {
+        flow_value new = {};
+        new.packet_counter = 1;
+        new.transmited_bytes = pkt->pkt_len;
+        new.timestamp = bpf_ktime_get_ns();
+        new.duration = 0;
+        int current_flags = 0;
+        for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
+            if(pkt->flags[i])
+                new.flags[i] = 2;
+            else if(!pkt->flags[i] && new.flags[i] != 2)
+                new.flags[i] = 1;
+            current_flags = current_flags + new.flags[i];
+            current_flags = current_flags * 10;
+        }
+        new.scan = predict(new.duration,key.protocol,key.dst_port,new.packet_counter,new.transmited_bytes,current_flags);
+        flow_table.update(&key, &new);
+        
+    }
+}
+
+int ebpf_main(struct xdp_md *ctx) {
 
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
-    struct pkt_data pkt = {};
-   
+    pkt_data pkt = {};
+
     if(!packet_parser(&pkt,data,data_end))
         return XDP_PASS;
 
-    key.src_ip = pkt.src;
-    key.src_port = pkt.port16[0];
-    key.dst_ip = pkt.dst;
-    key.dst_port = pkt.port16[1];
-    key.protocol = pkt.l4_proto;
-
-    struct flow_value *value = flow_table.lookup(&key);
-    if (value) {
-        value->count++;
-        value->timestamp = bpf_ktime_get_ns();
-    } else {
-        struct flow_value new = {};
-        new.count = 1;
-        new.timestamp = bpf_ktime_get_ns();
-        flow_table.update(&key, &new);
-    }
+    flow_table_add(&pkt);
 
     return XDP_PASS;
 }
