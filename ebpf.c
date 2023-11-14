@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include <linux/if_packet.h>
 #include <linux/ipv6.h>
+//#include "rf_model.h"
 
 typedef struct flow_key {
     __u32 src_ip;
@@ -37,6 +38,7 @@ typedef struct pkt_data {
     bool flags[6];
 }pkt_data;
 
+
 typedef struct tree_node {
     int feature;
     int value;
@@ -47,6 +49,7 @@ typedef struct tree_node {
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 100);
 BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("hash", int, int, tree_roots, N_TREES);
+
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -157,15 +160,15 @@ static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_e
 
 static __always_inline int predict(__u64 duration,__u16 protocol, __u16 dst_port,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
 
-    int result = 0;
     int features[6] = {duration,protocol,dst_port,packet_counter,transmited_bytes,current_flags};
+    int votes [2] = {0,0}; // the size should be the same as the number of classes
     int j = 0;
     for (int i = 0; i < N_TREES; i++) {
         int* current_root = tree_roots.lookup(&j);
         j++;
         if(current_root){
             int current_node = *current_root;
-            for (int d = 0; d < MTD+1; d++){
+            for (int d = 0; d <= MTD; d++){
                 tree_node* node = tree_nodes.lookup(&current_node);
                 if(node){
                     if(node->feature < sizeof(features)/sizeof(int) && node->feature >= 0){
@@ -177,20 +180,32 @@ static __always_inline int predict(__u64 duration,__u16 protocol, __u16 dst_port
                         }
                     }
                     else{
-                        result += node->value;
-                        break;
+                        if(node->value < sizeof(votes)/sizeof(int) && node->value >= 0){
+                            votes[node->value] += 1;
+                            break;
+                        }
+                        else
+                            continue;
                     }
                 }
                 else
-                   continue;;
+                   continue;
             }
         }
         else
-            continue;
-            
+            continue;    
     }
-    
-    return result;
+
+    int most_voted_class = -1;
+    int most_voted_votes = 0;
+    for (int i=0; i<2; i++) {
+
+        if (votes[i] > most_voted_votes) {
+            most_voted_class = i;
+            most_voted_votes = votes[i];
+        }
+    }
+    return most_voted_class;
 }
 
 static __always_inline void flow_table_add(pkt_data *pkt){

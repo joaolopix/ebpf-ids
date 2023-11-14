@@ -2,7 +2,6 @@ from bcc import BPF
 import sys
 import time
 import socket
-import datetime
 import ctypes
 import rf_model as rf_model
 
@@ -81,17 +80,25 @@ def main():
         while True:
             time.sleep(2) 
             print("\n\nTable size: "+ str(len(b["flow_table"])) + "\n")
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
+                    .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","SCAN","FLAGS"))
             for k,v in b["flow_table"].items(): 
 
                 src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
                 dst_ip = socket.inet_ntoa(k.dst_ip.to_bytes(4, byteorder='little'))
                 src_port = socket.ntohs(k.src_port)
                 dst_port = socket.ntohs(k.dst_port)
-                #ts = datetime.datetime.fromtimestamp(v.timestamp/1e9)
                 ts = v.duration/1e9
+                f = ['U','A','P','R','S','F']
+                fl = ""
+                for i,flag in enumerate(v.flags):
+                    if flag == 2:
+                        fl += f[i]
+                    else:
+                        fl += '.'
                 
-                print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | Cont: {:<6} | Bytes: {:<6} | Duration: {} | Scan: {}'
-                      .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),v.scan))
+                print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
+                      .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),v.scan,fl))
             #b.trace_print()
 
 
