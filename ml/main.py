@@ -61,8 +61,16 @@ def dataset_processing():
     undersampled_df = undersampled_df.sample(frac=1, random_state=42).reset_index(drop=True)
     data = undersampled_df
 
+    data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
+    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+
     # Get Target data
     Y = data['label']
+    # Assuming 'label' is a column in your DataFrame 'data'
+    label_counts = data['Proto'].value_counts()
+
+    # Display the counts
+    print(label_counts)
 
     # Get X data
     X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Src Pt', 'attackType','attackID',
@@ -70,7 +78,6 @@ def dataset_processing():
 
     X['Bytes'] = X['Bytes'].apply(convert_bytes).astype(int)
     X['Flags'] = X['Flags'].apply(convert_falgs).astype(int)
-    X['Proto'] = X['Proto'].apply(convert_proto).astype(int)
     X['Dst Pt'] = X['Dst Pt'].astype(int)
     X['Duration'] = X['Duration'] * 1e6
     X['Duration'] = X['Duration'].astype(int)
@@ -78,12 +85,12 @@ def dataset_processing():
 
     return X,Y
 
-def train_model(X,Y):
+def train_model(X,Y,n_trees,max_depth):
 
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 
     rf_Model = RandomForestClassifier()
-    rf_Model.set_params(n_estimators=10,max_depth=3,max_leaf_nodes=1000)
+    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000)
     rf_Model.fit(X_train, Y_train)
     print(f'Train Accuracy - : {rf_Model.score(X_train, Y_train):.3f}')
     print(f'Test Accuracy - : {rf_Model.score(X_test, Y_test):.3f}')
@@ -112,10 +119,10 @@ def main():
     max_depth = 3
     emlearn_file = 'rf.h'
     X,Y = dataset_processing()
-    rf_Model = train_model(X,Y)
+    rf_Model = train_model(X,Y,n_trees,max_depth)
     model_to_C(rf_Model,emlearn_file)
-    rf_gen_C.generate_C_code(emlearn_file,'rf_mode.h',n_trees)
-    rf_gen_PY.generate_PY_code(emlearn_file,'rf_mode.py',max_depth)
+    rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
+    rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)
 
 if __name__ == "__main__":
      main()
