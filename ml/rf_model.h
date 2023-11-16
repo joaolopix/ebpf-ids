@@ -302,18 +302,18 @@ static inline int rf_predict_tree_9(int *features) {
 	int vote=0;
 	int normal=0;
 	int attack = 0;
-	vote += rf_predict_tree_0(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_1(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_2(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_3(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_4(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_5(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_6(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_7(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_8(features);if(vote==0) attack +=1; else normal += 1;
-	vote += rf_predict_tree_9(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_0(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_1(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_2(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_3(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_4(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_5(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_6(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_7(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_8(features);if(vote==0) attack +=1; else normal += 1;
+	vote = rf_predict_tree_9(features);if(vote==0) attack +=1; else normal += 1;
 
-	if(normal >= attack)
+	if(normal > attack)
 		return 1;
 	else
 		return 0;
