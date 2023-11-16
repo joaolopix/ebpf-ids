@@ -7,7 +7,7 @@
 #include <linux/types.h>
 #include <linux/if_packet.h>
 #include <linux/ipv6.h>
-//#include "rf_model.h"
+#include "rf_model.h"
 
 typedef struct flow_key {
     __u32 src_ip;
@@ -46,10 +46,10 @@ typedef struct tree_node {
     int right;
 } tree_node;
 
+
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 100);
 BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("hash", int, int, tree_roots, N_TREES);
-
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -158,8 +158,7 @@ static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_e
     return true;
 }
 
-static __always_inline int predict(__u64 duration,__u16 protocol, __u16 dst_port,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
-
+static __always_inline int predict_MAP(__u64 duration,__u16 protocol, __u16 dst_port,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
     int features[6] = {duration,protocol,dst_port,packet_counter,transmited_bytes,current_flags};
     int votes [2] = {0,0}; // the size should be the same as the number of classes
     int j = 0;
@@ -168,7 +167,7 @@ static __always_inline int predict(__u64 duration,__u16 protocol, __u16 dst_port
         j++;
         if(current_root){
             int current_node = *current_root;
-            for (int d = 0; d <= MTD; d++){
+            for (int d = 0; d <= MAX_TREE_DEPTH; d++){
                 tree_node* node = tree_nodes.lookup(&current_node);
                 if(node){
                     if(node->feature < sizeof(features)/sizeof(int) && node->feature >= 0){
@@ -235,7 +234,10 @@ static __always_inline void flow_table_add(pkt_data *pkt){
             current_flags = current_flags + value->flags[i];
             current_flags = current_flags * 10;
         }
-        value->scan = predict(value->duration,key.protocol,key.dst_port,value->packet_counter,value->transmited_bytes,current_flags);
+        if(MODEL_MODE)
+            value->scan = predict_MAP(value->duration,key.protocol,key.dst_port,value->packet_counter,value->transmited_bytes,current_flags);
+        else
+            value->scan = predict_C(value->duration,key.protocol,key.dst_port,value->packet_counter,value->transmited_bytes,current_flags);
 
     } 
     else {
@@ -253,7 +255,11 @@ static __always_inline void flow_table_add(pkt_data *pkt){
             current_flags = current_flags + new.flags[i];
             current_flags = current_flags * 10;
         }
-        new.scan = predict(new.duration,key.protocol,key.dst_port,new.packet_counter,new.transmited_bytes,current_flags);
+        if(MODEL_MODE)
+            new.scan = predict_MAP(new.duration,key.protocol,key.dst_port,new.packet_counter,new.transmited_bytes,current_flags);
+        else
+            new.scan = predict_C(new.duration,key.protocol,key.dst_port,new.packet_counter,new.transmited_bytes,current_flags);
+
         flow_table.update(&key, &new);
         
     }

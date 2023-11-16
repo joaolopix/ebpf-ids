@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sn
 import numpy as np
 import rf_gen_PY
+import rf_gen_C
 
 def convert_bytes(size):
     if 'M' in size:
@@ -64,8 +65,8 @@ def dataset_processing():
     Y = data['label']
 
     # Get X data
-    X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Src Pt', 'attackType',
-                   'attackID', 'attackDescription','Flows','Tos'], axis=1)
+    X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Src Pt', 'attackType','attackID',
+                   'attackDescription','Flows','Tos'], axis=1)
 
     X['Bytes'] = X['Bytes'].apply(convert_bytes).astype(int)
     X['Flags'] = X['Flags'].apply(convert_falgs).astype(int)
@@ -100,40 +101,21 @@ def train_model(X,Y):
 
     return rf_Model
 
-def model_to_C(rf_Model):
+def model_to_C(rf_Model,file_name):
 
     cmodel = emlearn.convert(rf_Model)
-    cmodel.save(file='rf.h', name='rf')
+    cmodel.save(file=file_name, name='rf')
 
 def main():
 
+    n_trees = 10
+    max_depth = 3
+    emlearn_file = 'rf.h'
     X,Y = dataset_processing()
     rf_Model = train_model(X,Y)
-   #model_to_C(rf_Model)
-   #rf_gen.generate_PY_code()
-
-    #forest = rf_Model.estimators_
-#
-    ## Initialize an array to store the tree nodes
-    #root_nodes = []
-    #nodes = []
-    #root_counter = 0
-    ## Loop through each tree in the forest
-    #for tree_index, tree in enumerate(forest):
-    #    # Initialize an array to store the nodes of the current tree
-    #    root_nodes += [root_counter]
-    #    # Traverse the tree and extract the information
-    #    for node_index in range(tree.tree_.node_count):
-    #        feature_index = tree.tree_.feature[node_index]
-    #        threshold = tree.tree_.threshold[node_index]
-    #        left_child = tree.tree_.children_left[node_index]
-    #        right_child = tree.tree_.children_right[node_index]
-    #        root_counter+= 1
-    #        nodes += [[feature_index,threshold,left_child,right_child]]
-#
-    #print(root_nodes)
-    #for n in nodes:
-    #    print(n)
+    model_to_C(rf_Model,emlearn_file)
+    rf_gen_C.generate_C_code(emlearn_file,'rf_mode.h',n_trees)
+    rf_gen_PY.generate_PY_code(emlearn_file,'rf_mode.py',max_depth)
 
 if __name__ == "__main__":
      main()

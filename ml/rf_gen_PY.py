@@ -41,22 +41,15 @@ rf_nodes = [
         content += f",{value}"
     content += "]\n"
 
-    # Write the content string to the destination file
     with open(dest_file, 'w') as dest:
         dest.write(content)
 
-def generate_PY_code():
-    # Specify your source and destination file paths
-    source_file_path = 'rf.h'
-    dest_file_path = 'rf_model.py'
-    max_tree_depth_value = 3  # Replace with your desired value
+def generate_PY_code(source_file_path,dest_file_path,max_tree_depth_value):
 
-    # Specify the start and end patterns for the sections you want to copy
     start_pattern_nodes = 'EmlTreesNode rf_nodes'
     end_pattern_nodes = '};'
 
     start_pattern_roots = 'int32_t rf_tree_roots'
 
-    # Extract, copy, and store roots_values from the source file
     extract_and_copy(source_file_path, dest_file_path, start_pattern_nodes, end_pattern_nodes, start_pattern_roots,max_tree_depth_value)
 
