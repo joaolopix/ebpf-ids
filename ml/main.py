@@ -1,7 +1,8 @@
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, precision_recall_curve, auc
+from sklearn.preprocessing import LabelEncoder
 from sklearn.utils import resample
 import emlearn
 import matplotlib.pyplot as plt
@@ -12,8 +13,8 @@ import rf_gen_C
 
 def convert_bytes(size):
     if 'M' in size:
-        return float(size.replace('M', '')) * 1024 * 1024  # Convert from megabytes to bytes
-    return size
+        return int(float(size.replace('M', '')) * 10**6)  # Convert from megabytes to bytes
+    return int(size)
 
 def convert_falgs(flags):
     flags_ = 0
@@ -24,7 +25,7 @@ def convert_falgs(flags):
         if flag == '.':
             flags_ = flags_ + 1
             flags_ = flags_ * 10
-    flags_ = flags_/10
+    flags_ = flags_ / 10
     return int(flags_)
 
 def convert_proto(proto):
@@ -37,16 +38,100 @@ def convert_proto(proto):
     elif 'ICMP' in proto:
         return 1
 
-def dataset_processing():
+def convert_attack_desc_to_proto(desc):
+    if '-sU' in desc:
+        return 17
+    elif 'sF' in desc or 'sS' in desc or 'sA' in desc:
+        return 6
+    elif 'sP' in desc:
+        return 1
+    elif "---" in desc:
+        return 0
+
+def convert_attack_desc(desc):
+    if 'sU' in desc:
+        return 1
+    elif 'sF' in desc:
+        return 2
+    elif 'sS' in desc:
+        return 3
+    elif 'sA' in desc:
+        return 4
+    elif 'sP' in desc:
+        return 5
+    elif "---" in desc:
+        return 0
+
+def convert_attack_desc_number_to_proto(desc):
+    if 1 == desc:
+        return 17
+    elif 2 == desc or 3 == desc or 4 == desc:
+        return 6
+    elif 5 == desc:
+        return 1
+    elif 0 == desc:
+        return 0
+
+def dataset_statistics(file_name):
     # Read the CSV file
-    data = pd.read_csv("week2.csv", delimiter=",",low_memory=False)
+    data = pd.read_csv(file_name, delimiter=",", low_memory=False)
+    data = data[data['label'] != 'victim']
+    data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
+    label_counts = data['label'].value_counts()
+    print(f"Default Dataset\nnormal: {label_counts['normal']}\nattacker: {label_counts['attacker']}\n",)
+
+    proto_counts = data[(data['label'] == 'attacker')]
+    proto_counts = proto_counts['Proto'].value_counts()
+    print(f"Protocols used by attacker\nTCP: {proto_counts[6]}\nUDP: {proto_counts[17]}\nICMP: {proto_counts[1]}\n")
+
+    proto_counts = data[(data['label'] == 'normal')]
+    proto_counts = proto_counts['Proto'].value_counts()
+    print(f"Protocols used by normal activity\nTCP: {proto_counts[6]}\nUDP: {proto_counts[17]}\nICMP: {proto_counts[1]}\nIGMP: {proto_counts[2]}\n")
+
+    attack_counts = data['attackDescription'].apply(convert_attack_desc).astype(int)
+    attack_counts = attack_counts.value_counts()
+    print(f"Attacks\nsU: {attack_counts[1]}\nsF: {attack_counts[2]}\nsS: {attack_counts[3]}\nsA: {attack_counts[4]}\nsP: {attack_counts[5]}\n")
+
+    attack_convert = data['attackDescription'].apply(convert_attack_desc_to_proto).astype(int)
+    attack_convert = attack_convert.value_counts()
+    print(f"Attacks by Protocol\nTCP: {attack_convert[6]}\nUDP: {attack_convert[17]}\nICMP: {attack_convert[1]}\n")
+
+    data['attackDescription'] = data['attackDescription'].apply(convert_attack_desc).astype(int)
+    miss_classified_icmp = data[(data['Proto'] == 1) & (data['attackDescription'] != 5) & (data['label'] == 'attacker')]
+    miss_classified_tcp = data[(data['Proto'] == 6) & (data['attackDescription'] != 2) & (data['attackDescription'] != 3) & (data['attackDescription'] != 4) & (data['label'] == 'attacker')]
+    miss_classified_udp = data[(data['Proto'] == 17) & (data['attackDescription'] != 1) & (data['label'] == 'attacker')]
+    print(f"Miss classified ICMP {len(miss_classified_icmp)}")
+    print(f"Miss classified TCP {len(miss_classified_tcp)}")
+    print(f"Miss classified UDP {len(miss_classified_udp)}\n")
+
+    data = data[~((data['attackDescription'] == 5))]
+    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+
+    test = data[(data['label'] == 'attacker')]
+    print(data['Tos'].value_counts())
+    print("ToS by Attacker")
+    print(test['Tos'].value_counts())
+
+    print()
+    print(data['Flows'].value_counts())
+
+def dataset_processing():
+
+    # Read the CSV file
+    df1 = pd.read_csv("week1.csv", delimiter=",",low_memory=False)
+    df2 = pd.read_csv("week2.csv", delimiter=",", low_memory=False)
+
+    data = pd.concat([df1, df2], ignore_index=True)
 
     # Drop rows where 'label' column has the value 'victim'
     data = data[data['label'] != 'victim']
 
-    # Replace all rows in the 'Dst Pt' column that have float values with NaN and Drop rows where 'Dst Pt' is NaN
-    data['Dst Pt'] = pd.to_numeric(data['Dst Pt'], errors='coerce')
-    data = data.dropna(subset=['Dst Pt'])
+    # Remove labels with IGMP AND ICMP Protocol
+    data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
+    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+    # Remove Ping scan
+    data['attackDescription'] = data['attackDescription'].apply(convert_attack_desc).astype(int)
+    data = data[~((data['attackDescription'] == 5))]
 
     class_counts = data['label'].value_counts()
     minority_class = class_counts.idxmin()
@@ -61,28 +146,23 @@ def dataset_processing():
     undersampled_df = undersampled_df.sample(frac=1, random_state=42).reset_index(drop=True)
     data = undersampled_df
 
-    data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
-    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
-
     # Get Target data
     Y = data['label']
-    # Assuming 'label' is a column in your DataFrame 'data'
-    label_counts = data['Proto'].value_counts()
-
-    # Display the counts
-    print(label_counts)
 
     # Get X data
-    X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Src Pt', 'attackType','attackID',
-                   'attackDescription','Flows','Tos'], axis=1)
+    X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Dst Pt','Src Pt','attackType','attackID','attackDescription','Flows','Tos'], axis=1)
 
-    X['Bytes'] = X['Bytes'].apply(convert_bytes).astype(int)
-    X['Flags'] = X['Flags'].apply(convert_falgs).astype(int)
-    X['Dst Pt'] = X['Dst Pt'].astype(int)
+    X['Bytes'] = X['Bytes'].apply(convert_bytes).astype('Int64')
+    X['Flags'] = X['Flags'].apply(convert_falgs).astype('Int64')
+    #X['Dst Pt'] = X['Dst Pt'].astype('Int64')
+    #X['Src Pt'] = X['Src Pt'].astype('Int64')
     X['Duration'] = X['Duration'] * 1e6
-    X['Duration'] = X['Duration'].astype(int)
-    X['Packets'] = X['Packets'].astype(int)
+    X['Duration'] = X['Duration'].round().astype('Int64')
+    X['Packets'] = X['Packets'].astype('Int64')
 
+    print(X.head(100))
+
+    print("\nData processing completed\n")
     return X,Y
 
 def train_model(X,Y,n_trees,max_depth):
@@ -90,12 +170,30 @@ def train_model(X,Y,n_trees,max_depth):
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 
     rf_Model = RandomForestClassifier()
-    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000)
+    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True)
     rf_Model.fit(X_train, Y_train)
-    print(f'Train Accuracy - : {rf_Model.score(X_train, Y_train):.3f}')
-    print(f'Test Accuracy - : {rf_Model.score(X_test, Y_test):.3f}')
 
     Y_predicted = rf_Model.predict(X_test)
+    # Evaluate performance metrics
+    label_encoder = LabelEncoder()
+    Y_test_binary = label_encoder.fit_transform(Y_test)
+    Y_predicted_binary = label_encoder.transform(Y_predicted)
+    accuracy = accuracy_score(Y_test_binary,  Y_predicted_binary)
+    precision = precision_score(Y_test_binary,  Y_predicted_binary)
+    recall = recall_score(Y_test_binary,  Y_predicted_binary)
+    f1 = f1_score(Y_test_binary,  Y_predicted_binary)
+    precision_curve, recall_curve, _ = precision_recall_curve(Y_test_binary, Y_predicted_binary)
+    area_under_curve = auc(recall_curve, precision_curve)
+    oob_score = rf_Model.oob_score_
+
+    # Displaying the results
+    print(f"Accuracy: {accuracy:.3f}")
+    print(f"Precision: {precision:.3f}")
+    print(f"Recall: {recall:.3f}")
+    print(f"F1 Score: {f1:.3f}")
+    print(f"Area Under Precision-Recall Curve: {area_under_curve:.3f}")
+    print(f"OOB Score: {oob_score:.3f}")
+
     cm = confusion_matrix(Y_test,Y_predicted,labels=rf_Model.classes_)
     cm_norm = cm/cm.sum(axis=1)[:,np.newaxis]
     class_labels = rf_Model.classes_
@@ -113,12 +211,97 @@ def model_to_C(rf_Model,file_name):
     cmodel = emlearn.convert(rf_Model)
     cmodel.save(file=file_name, name='rf')
 
+def evaluate_ntrees(X, Y, min_trees, max_trees, step_size):
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+
+    n_trees_range = range(min_trees, max_trees + 1, step_size)
+    accuracy_scores, precision_scores, recall_scores, f1_scores, oob_scores = [], [], [], [], []
+
+    for n_trees in n_trees_range:
+        rf_Model = RandomForestClassifier(n_estimators=n_trees, max_leaf_nodes=1000, oob_score=True)
+        rf_Model.fit(X_train, Y_train)
+
+        Y_predicted = rf_Model.predict(X_test)
+
+        # Evaluate performance metrics
+        label_encoder = LabelEncoder()
+        Y_test_binary = label_encoder.fit_transform(Y_test)
+        Y_predicted_binary = label_encoder.transform(Y_predicted)
+
+        accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
+        precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
+        recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
+        f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
+        oob_scores.append(rf_Model.oob_score_)
+
+    # Plot the results
+    plt.figure(figsize=(10, 6))
+
+    # You can plot different metrics on the same graph or create multiple subplots for each metric
+    plt.plot(n_trees_range, accuracy_scores, label='Accuracy')
+    plt.plot(n_trees_range, precision_scores, label='Precision')
+    plt.plot(n_trees_range, recall_scores, label='Recall')
+    plt.plot(n_trees_range, f1_scores, label='F1 Score')
+    plt.plot(n_trees_range, oob_scores, label='OOB Score')
+
+    plt.xlabel('Number of Trees')
+    plt.ylabel('Score')
+    plt.title('Random Forest Performance vs. Number of Trees')
+    plt.legend()
+    plt.show()
+
+def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees):
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+
+    d_range = range(min_d, max_d + 1, step_size)
+    accuracy_scores, precision_scores, recall_scores, f1_scores, oob_scores = [], [], [], [], []
+
+    for d in d_range:
+        rf_Model = RandomForestClassifier(n_estimators=n_trees,max_depth=d, max_leaf_nodes=1000, oob_score=True)
+        rf_Model.fit(X_train, Y_train)
+
+        Y_predicted = rf_Model.predict(X_test)
+
+        # Evaluate performance metrics
+        label_encoder = LabelEncoder()
+        Y_test_binary = label_encoder.fit_transform(Y_test)
+        Y_predicted_binary = label_encoder.transform(Y_predicted)
+
+        accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
+        precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
+        recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
+        f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
+        oob_scores.append(rf_Model.oob_score_)
+
+    # Plot the results
+    plt.figure(figsize=(10, 6))
+
+    # You can plot different metrics on the same graph or create multiple subplots for each metric
+    plt.plot(d_range, accuracy_scores, label='Accuracy')
+    plt.plot(d_range, precision_scores, label='Precision')
+    plt.plot(d_range, recall_scores, label='Recall')
+    plt.plot(d_range, f1_scores, label='F1 Score')
+    plt.plot(d_range, oob_scores, label='OOB Score')
+
+    plt.xlabel('Number of Trees')
+    plt.ylabel('Score')
+    plt.title('Random Forest Performance vs. Number of Trees')
+    plt.legend()
+    plt.show()
+
 def main():
 
-    n_trees = 10
+    #dataset_statistics("week1.csv")
+    #dataset_statistics("week2.csv")
+
+    X,Y = dataset_processing()
+
+    #evaluate_ntrees(X, Y, min_trees=5, max_trees=100, step_size=5)
+    #evaluate_depth(X, Y, min_d=1, max_d=50, step_size=5,n_trees=11)
+
+    n_trees = 11
     max_depth = 3
     emlearn_file = 'rf.h'
-    X,Y = dataset_processing()
     rf_Model = train_model(X,Y,n_trees,max_depth)
     model_to_C(rf_Model,emlearn_file)
     rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)

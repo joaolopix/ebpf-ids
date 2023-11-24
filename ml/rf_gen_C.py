@@ -19,8 +19,8 @@ def extract_and_copy(source_file_path, dest_file_path, start_pattern_trees, end_
             content += line
 
 
-    content += "\rstatic inline int predict_C(__u64 duration,__u16 protocol, __u16 dst_port,__u64 packet_counter, __u64 transmited_bytes, int current_flags) {" \
-               "\n\tint features[6] = {duration*10,protocol*10,dst_port*10,packet_counter*10,transmited_bytes*10,current_flags*10};" \
+    content += "\rstatic inline int predict_C(__u64 duration,__u16 protocol,__u64 packet_counter, __u64 transmited_bytes, int current_flags) {" \
+               "\n\tint features[5] = {duration*10,protocol*10,packet_counter*10,transmited_bytes*10,current_flags*10};" \
                "\n\tint vote=0;" \
                "\n\tint normal=0;" \
                "\n\tint attack = 0;\n"
