@@ -4,6 +4,7 @@ import time
 import socket
 import ctypes
 import rf_model as rf_model
+from datetime import datetime
 
 def usage():
     print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [LISTEN MODE]")
@@ -67,39 +68,64 @@ def get_listen_mode():
     mode = -1
     if "-K" == sys.argv[4]:
         return 0
-    if "-U" == sys.argv[4]:
+    if "-Uf" == sys.argv[4]:
         return 1
+    if "-Up" == sys.argv[4]:
+        return 2
     return mode
 
 def listen(b,mode):
 
+    def print_data(cpu, data, size):
+        e = b["output"].event(data)
+
+        def convert_ip_to_string(ip_integer):
+            ip_integer = ip_integer & 0xFFFFFFFF
+            return socket.inet_ntoa(ip_integer.to_bytes(4, byteorder='little'))
+
+        src_ip = convert_ip_to_string(e.src_ip)
+        dst_ip = convert_ip_to_string(e.dst_ip)
+        dst_port = socket.ntohs(e.dst_port)
+        current_datetime = datetime.fromtimestamp(time.time())
+        if e.type == 0:
+            print("{} - PORT SCAN DETECTED WITH ORIGIN {} TO {}:{}".format(current_datetime,src_ip,dst_ip,dst_port))
+        elif e.type == 1:
+            print("{} - PORT SCAN WITH ORIGIN {} TO {}:{} AS BEEN DECLASSIFIED".format(current_datetime,src_ip,dst_ip,dst_port))
+
+    def print_flowtable():
+        print("\n\nTable size: "+ str(len(b["flow_table"])) + "\n")
+        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
+                .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","SCAN","FLAGS"))
+        for k,v in b["flow_table"].items(): 
+
+            src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
+            dst_ip = socket.inet_ntoa(k.dst_ip.to_bytes(4, byteorder='little'))
+            src_port = socket.ntohs(k.src_port)
+            dst_port = socket.ntohs(k.dst_port)
+            ts = v.duration/1e9
+            f = ['U','A','P','R','S','F']
+            fl = ""
+            for i,flag in enumerate(v.flags):
+                if flag == 2:
+                    fl += f[i]
+                else:
+                    fl += '.'
+            
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
+                    .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),v.scan,fl))
+            
+    if mode == 2:
+        b["output"].open_perf_buffer(print_data)
+
     try:
         while True:
-            if mode: # Userspace mode
+            if mode == 1:
                 time.sleep(2) 
-                print("\n\nTable size: "+ str(len(b["flow_table"])) + "\n")
-                print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
-                        .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","SCAN","FLAGS"))
-                for k,v in b["flow_table"].items(): 
-
-                    src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
-                    dst_ip = socket.inet_ntoa(k.dst_ip.to_bytes(4, byteorder='little'))
-                    src_port = socket.ntohs(k.src_port)
-                    dst_port = socket.ntohs(k.dst_port)
-                    ts = v.duration/1e9
-                    f = ['U','A','P','R','S','F']
-                    fl = ""
-                    for i,flag in enumerate(v.flags):
-                        if flag == 2:
-                            fl += f[i]
-                        else:
-                            fl += '.'
-                    
-                    print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
-                            .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),v.scan,fl))
+                print_flowtable()
+            elif mode == 2:
+                b.perf_buffer_poll()
             else:
                 b.trace_print()
-
 
     except KeyboardInterrupt:
        return
@@ -136,7 +162,7 @@ def main():
         print("EBPF-IDS: ML MODEL LOADED")
 
     b.attach_xdp(device, fn, flags)
-    print("EBPF-IDS: ATTACHED")
+    print("EBPF-IDS: ATTACHED\n")
 
     listen(b,listen_mode)
 

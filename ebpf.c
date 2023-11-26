@@ -24,6 +24,7 @@ typedef struct flow_value {
     __u64 transmited_bytes;
     __u64 flags[6];
     __u64 scan;
+    __u64 pred_mod;
 }flow_value;
 
 typedef struct pkt_data {
@@ -38,7 +39,6 @@ typedef struct pkt_data {
     bool flags[6];
 }pkt_data;
 
-
 typedef struct tree_node {
     int feature;
     int value;
@@ -46,10 +46,18 @@ typedef struct tree_node {
     int right;
 } tree_node;
 
+typedef struct event {
+    int type;
+    int src_ip;
+    int dst_ip;
+    int dst_port;
+} event;
+
 
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 100);
 BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("hash", int, int, tree_roots, N_TREES);
+BPF_PERF_OUTPUT(output);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -207,7 +215,7 @@ static __always_inline int predict_MAP(__u64 duration,__u16 protocol,__u64 packe
     return most_voted_class;
 }
 
-static __always_inline void flow_table_add(pkt_data *pkt){
+static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_value *fv){
     flow_key key = {};
 
     key.src_ip = pkt->src;
@@ -232,11 +240,18 @@ static __always_inline void flow_table_add(pkt_data *pkt){
             current_flags = current_flags + value->flags[i];
             current_flags = current_flags * 10;
         }
+        __u64 prev_scan_pred =  value->scan;
         if(MODEL_MODE)
             value->scan = predict_MAP(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
         else
             value->scan = predict_C(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
 
+        if(prev_scan_pred != value->scan)
+            value->pred_mod = 1;
+        else
+            value->pred_mod = 0;
+
+        *fv = *value;
     } 
     else {
         flow_value new = {};
@@ -244,6 +259,7 @@ static __always_inline void flow_table_add(pkt_data *pkt){
         new.transmited_bytes = pkt->pkt_len;
         new.timestamp = bpf_ktime_get_ns();
         new.duration = 0;
+        new.pred_mod = 0;
         int current_flags = 0;
         for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
             if(pkt->flags[i])
@@ -257,22 +273,46 @@ static __always_inline void flow_table_add(pkt_data *pkt){
             new.scan = predict_MAP(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
         else
             new.scan = predict_C(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
+        
+        *fv = new;
 
         flow_table.update(&key, &new);
         
+        
     }
+
+    *fk = key;
+}
+
+static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_value fv){
+
+    if(!fv.scan){
+        event e = {0,fk.src_ip,fk.dst_ip,fk.dst_port};
+        output.perf_submit(ctx, &e, sizeof(event));
+    }
+    if(fv.pred_mod){
+        event e = {1,fk.src_ip,fk.dst_ip,fk.dst_port};
+        output.perf_submit(ctx, &e, sizeof(event));
+    }
+
 }
 
 int ebpf_main(struct xdp_md *ctx) {
 
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
+
     pkt_data pkt = {};
 
     if(!packet_parser(&pkt,data,data_end))
         return XDP_PASS;
 
-    flow_table_add(&pkt);
+    flow_key fk = {};
+    flow_value fv = {};
+
+    flow_table_add(&pkt,&fk,&fv);
+
+    event_output(ctx,fk,fv);
 
     return XDP_PASS;
 }
