@@ -5,20 +5,22 @@ import socket
 import ctypes
 import rf_model as rf_model
 from datetime import datetime
+import math
 
 def usage():
     print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [LISTEN MODE]")
     print("\nXDP MODE:")
-    print("\t-S: use skb mode")
+    print("\t-S: use skb / generic mode")
     print("\t-D: use driver mode")
     print("\t-H: use hardware offload mode")
     print("ML MODEL MODE:")
     print("\t-C: C compiled model mode")
-    print("\t-M: MAPs stored model")
+    print("\t-M: MAPs stored model node")
     print("LISTEN MODE:")
-    print("\t-U: Userspace mode")
-    print("\t-K: Kernel mode")
-    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C\n")
+    print("\t-Up: Userspace mode showing Logs from Perf Output")
+    print("\t-Uf: Userspace mode showing Flows")
+    print("\t-K: Kernel mode showing bpf_trace_printk")
+    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Up\n")
 
 def check_input_args():
     if len(sys.argv) < 4:
@@ -88,14 +90,14 @@ def listen(b,mode):
         dst_port = socket.ntohs(e.dst_port)
         current_datetime = datetime.fromtimestamp(time.time())
         if e.type == 0:
-            print("{} - PORT SCAN DETECTED WITH ORIGIN {} TO {}:{}".format(current_datetime,src_ip,dst_ip,dst_port))
+            print("{} - ALERT: Possible Port Scan detected from {} to {}:{}".format(current_datetime,src_ip,dst_ip,dst_port))
         elif e.type == 1:
-            print("{} - PORT SCAN WITH ORIGIN {} TO {}:{} AS BEEN DECLASSIFIED".format(current_datetime,src_ip,dst_ip,dst_port))
-
+            print("{} - INFO: Flow from {} to {}:{} has been declassified".format(current_datetime,src_ip,dst_ip,dst_port))
+  
     def print_flowtable():
         print("\n\nTable size: "+ str(len(b["flow_table"])) + "\n")
-        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
-                .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","SCAN","FLAGS"))
+        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} '
+                .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","FLAGS","SCAN","SCAN PROBABILITY"))
         for k,v in b["flow_table"].items(): 
 
             src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
@@ -110,9 +112,11 @@ def listen(b,mode):
                     fl += f[i]
                 else:
                     fl += '.'
+            scan_to_str = ['yes','no']
+            scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
             
-            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<4} | {}'
-                    .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),v.scan,fl))
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} % '
+                    .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
             
     if mode == 2:
         b["output"].open_perf_buffer(print_data)

@@ -72,9 +72,15 @@ def convert_attack_desc_number_to_proto(desc):
     elif 0 == desc:
         return 0
 
-def dataset_statistics(file_name):
-    # Read the CSV file
-    data = pd.read_csv(file_name, delimiter=",", low_memory=False)
+def dataset_statistics(file_name,file2 = None):
+    if file2 == None:
+        # Read the CSV file
+        data = pd.read_csv(file_name, delimiter=",", low_memory=False)
+    else:
+        df1 = pd.read_csv(file_name, delimiter=",", low_memory=False)
+        df2 = pd.read_csv(file2, delimiter=",", low_memory=False)
+        data = pd.concat([df1, df2], ignore_index=True)
+
     data = data[data['label'] != 'victim']
     data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
     label_counts = data['label'].value_counts()
@@ -115,6 +121,14 @@ def dataset_statistics(file_name):
     print()
     print(data['Flows'].value_counts())
 
+    print()
+    print("Number of packets in attacks")
+    npackets = data[(data['label'] == 'attacker')]
+    print(npackets['Packets'].value_counts())
+
+    sample_syn = data[(data['label'] == 'attacker') & (data['Packets'] == 2)]
+    print(sample_syn['attackDescription'].value_counts())
+
 def dataset_processing():
 
     # Read the CSV file
@@ -132,7 +146,7 @@ def dataset_processing():
     # Remove Ping scan
     data['attackDescription'] = data['attackDescription'].apply(convert_attack_desc).astype(int)
     data = data[~((data['attackDescription'] == 5))]
-
+    # Undersample
     class_counts = data['label'].value_counts()
     minority_class = class_counts.idxmin()
     majority_class = class_counts.idxmax()
@@ -174,7 +188,7 @@ def train_model(X,Y,n_trees,max_depth):
     rf_Model.fit(X_train, Y_train)
 
     Y_predicted = rf_Model.predict(X_test)
-    # Evaluate performance metrics
+    #Evaluate performance metrics
     label_encoder = LabelEncoder()
     Y_test_binary = label_encoder.fit_transform(Y_test)
     Y_predicted_binary = label_encoder.transform(Y_predicted)
@@ -293,6 +307,8 @@ def main():
 
     #dataset_statistics("week1.csv")
     #dataset_statistics("week2.csv")
+    #dataset_statistics("week1.csv","week2.csv")
+
 
     X,Y = dataset_processing()
 
@@ -303,6 +319,7 @@ def main():
     max_depth = 3
     emlearn_file = 'rf.h'
     rf_Model = train_model(X,Y,n_trees,max_depth)
+
     model_to_C(rf_Model,emlearn_file)
     rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
     rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)

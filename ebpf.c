@@ -19,12 +19,14 @@ typedef struct flow_key {
 
 typedef struct flow_value {
     __u64 packet_counter;
-    __u64 timestamp;
+    __u64 timestamp; // not a feature but used to calculate
     __u64 duration;
     __u64 transmited_bytes;
     __u64 flags[6];
-    __u64 scan;
-    __u64 pred_mod;
+    // end of features
+    __u64 scan; // 0 scan, 1 normal
+    __u64 scan_counter; // counts how many times has it been classified as a scan
+    __u64 pred_mod; // this is to log a prediction modificion from scan to normal
 }flow_value;
 
 typedef struct pkt_data {
@@ -246,7 +248,10 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         else
             value->scan = predict_C(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
 
-        if(prev_scan_pred != value->scan)
+         if(!value->scan)
+            value->scan_counter += 1;
+    
+        if(prev_scan_pred == 0 &&   value->scan == 1)
             value->pred_mod = 1;
         else
             value->pred_mod = 0;
@@ -260,6 +265,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         new.timestamp = bpf_ktime_get_ns();
         new.duration = 0;
         new.pred_mod = 0;
+        new.scan_counter = 0;
         int current_flags = 0;
         for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
             if(pkt->flags[i])
@@ -274,6 +280,9 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         else
             new.scan = predict_C(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
         
+        if(!new.scan)
+            new.scan_counter += 1;
+
         *fv = new;
 
         flow_table.update(&key, &new);
@@ -290,7 +299,8 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_v
         event e = {0,fk.src_ip,fk.dst_ip,fk.dst_port};
         output.perf_submit(ctx, &e, sizeof(event));
     }
-    if(fv.pred_mod){
+
+    else if(fv.pred_mod){
         event e = {1,fk.src_ip,fk.dst_ip,fk.dst_port};
         output.perf_submit(ctx, &e, sizeof(event));
     }
