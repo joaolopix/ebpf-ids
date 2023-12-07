@@ -16,7 +16,7 @@ def convert_bytes(size):
         return int(float(size.replace('M', '')) * 10**6)  # Convert from megabytes to bytes
     return int(size)
 
-def convert_falgs(flags):
+def convert_flags(flags):
     flags_ = 0
     for flag in flags:
         if flag != '.':
@@ -110,16 +110,23 @@ def dataset_statistics(file_name,file2 = None):
     print(f"Miss classified TCP {len(miss_classified_tcp)}")
     print(f"Miss classified UDP {len(miss_classified_udp)}\n")
 
-    data = data[~((data['attackDescription'] == 5))]
-    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+    print(f"Attacks with the ICMP proto: {miss_classified_icmp['attackDescription'].value_counts()} \n"
+          f"Attacks with the TCP proto {miss_classified_tcp['attackDescription'].value_counts()} \n"
+          f"Attacks with the UDP proto {miss_classified_udp['attackDescription'].value_counts()} \n")
 
     test = data[(data['label'] == 'attacker')]
+    print()
     print(data['Tos'].value_counts())
     print("ToS by Attacker")
     print(test['Tos'].value_counts())
 
     print()
     print(data['Flows'].value_counts())
+
+    data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+    data = data[~((data['attackDescription'] == 5))]
+    data = data[~((data['Proto'] == 6) & (data['attackDescription'] != 2) & (data['attackDescription'] != 3) & (data['attackDescription'] != 4) & (data['label'] == 'attacker'))]
+    data = data[~(((data['Proto'] == 17) & (data['attackDescription'] != 1) & (data['label'] == 'attacker')))]
 
     print()
     print("Number of packets in attacks")
@@ -128,6 +135,7 @@ def dataset_statistics(file_name,file2 = None):
 
     sample_syn = data[(data['label'] == 'attacker') & (data['Packets'] == 2)]
     print(sample_syn['attackDescription'].value_counts())
+
 
 def dataset_processing():
 
@@ -143,9 +151,15 @@ def dataset_processing():
     # Remove labels with IGMP AND ICMP Protocol
     data['Proto'] = data['Proto'].apply(convert_proto).astype(int)
     data = data[(data['Proto'] != 2) & (data['Proto'] != 1)]
+
     # Remove Ping scan
     data['attackDescription'] = data['attackDescription'].apply(convert_attack_desc).astype(int)
     data = data[~((data['attackDescription'] == 5))]
+
+    # Remove missidentidied UDP and TCP
+    data = data[~((data['Proto'] == 6) & (data['attackDescription'] != 2) & (data['attackDescription'] != 3) & (data['attackDescription'] != 4) & (data['label'] == 'attacker'))]
+    data = data[~(((data['Proto'] == 17) & (data['attackDescription'] != 1) & (data['label'] == 'attacker')))]
+
     # Undersample
     class_counts = data['label'].value_counts()
     minority_class = class_counts.idxmin()
@@ -167,7 +181,7 @@ def dataset_processing():
     X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Dst Pt','Src Pt','attackType','attackID','attackDescription','Flows','Tos'], axis=1)
 
     X['Bytes'] = X['Bytes'].apply(convert_bytes).astype('Int64')
-    X['Flags'] = X['Flags'].apply(convert_falgs).astype('Int64')
+    X['Flags'] = X['Flags'].apply(convert_flags).astype('Int64')
     #X['Dst Pt'] = X['Dst Pt'].astype('Int64')
     #X['Src Pt'] = X['Src Pt'].astype('Int64')
     X['Duration'] = X['Duration'] * 1e6
