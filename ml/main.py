@@ -137,7 +137,7 @@ def dataset_statistics(file_name,file2 = None):
     print(sample_syn['attackDescription'].value_counts())
 
 
-def dataset_processing():
+def dataset_processing(save=False):
 
     # Read the CSV file
     df1 = pd.read_csv("week1.csv", delimiter=",",low_memory=False)
@@ -188,9 +188,14 @@ def dataset_processing():
     X['Duration'] = X['Duration'].round().astype('Int64')
     X['Packets'] = X['Packets'].astype('Int64')
 
-    print(X.head(100))
+    print(X.head())
 
     print("\nData processing completed\n")
+
+    if save:
+        X.to_csv('X_data.csv', index=False)
+        Y.to_csv('Y_data.csv', index=False)
+
     return X,Y
 
 def train_model(X,Y,n_trees,max_depth):
@@ -198,7 +203,7 @@ def train_model(X,Y,n_trees,max_depth):
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 
     rf_Model = RandomForestClassifier()
-    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True)
+    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True,random_state=1122)
     rf_Model.fit(X_train, Y_train)
 
     Y_predicted = rf_Model.predict(X_test)
@@ -230,6 +235,19 @@ def train_model(X,Y,n_trees,max_depth):
     sn.heatmap(cm_norm, annot=True, fmt='.2f', xticklabels=class_labels, yticklabels=class_labels)
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
+    plt.show()
+
+    # Plotting
+    feature_importances = rf_Model.feature_importances_
+    sorted_indices = np.argsort(feature_importances)[::-1]
+    X_labels = ["Duration","Proto","Packets","Bytes","Flags"]
+    X_sorted = [X_labels[i] for i in sorted_indices]
+    plt.figure(figsize=(8, 6))
+    plt.bar(range(X.shape[1]), feature_importances[sorted_indices], align="center")
+    plt.xticks(range(X.shape[1]), X_sorted, rotation=45)
+    plt.xlabel("Feature Index")
+    plt.ylabel("Feature Importance")
+    plt.title("Random Forest Feature Importance")
     plt.show()
 
     return rf_Model
@@ -313,9 +331,24 @@ def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees):
 
     plt.xlabel('Number of Trees')
     plt.ylabel('Score')
-    plt.title('Random Forest Performance vs. Number of Trees')
+    plt.title('Random Forest Performance vs. Tree Depth')
     plt.legend()
     plt.show()
+
+def evaluate_balance(file_path):
+
+    with open(file_path, 'r') as src:
+        lines = src.readlines()
+
+    votes = [0,0]
+
+    for line in lines:
+        if "return 1;" in line:
+            votes[1] += 1
+        if "return 0;" in line:
+            votes[0] += 1
+
+    print(votes)
 
 def main():
 
@@ -324,7 +357,9 @@ def main():
     #dataset_statistics("week1.csv","week2.csv")
 
 
-    X,Y = dataset_processing()
+    #X,Y = dataset_processing(save=True)
+    X = pd.read_csv("X_data.csv", delimiter=",")
+    Y = pd.read_csv("Y_data.csv").values.ravel()
 
     #evaluate_ntrees(X, Y, min_trees=5, max_trees=100, step_size=5)
     #evaluate_depth(X, Y, min_d=1, max_d=50, step_size=5,n_trees=11)
@@ -337,6 +372,8 @@ def main():
     model_to_C(rf_Model,emlearn_file)
     rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
     rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)
+
+    evaluate_balance('rf_model.h')
 
 if __name__ == "__main__":
      main()

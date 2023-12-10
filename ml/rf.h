@@ -4,109 +4,130 @@
     #include <eml_trees.h>
     
 
-EmlTreesNode rf_nodes[70] = {
-  { 0, 500.0, 1, 2 },
-  { 4, 111166.0, 3, 4 },
-  { 3, 114.0, 7, 6 },
-  { 2, 1.5, 5, 6 },
-  { 4, 121111.5, 6, 6 },
-  { -1, 0, -1, -1 },
+EmlTreesNode rf_nodes[66] = {
+  { 3, 63.5, 1, 2 },
+  { 0, 500.0, 6, 5 },
+  { 1, 11.5, 3, 4 },
+  { 4, 116166.0, 5, 5 },
+  { 2, 1.5, 5, 5 },
   { -1, 1, -1, -1 },
-  { 3, 111.0, 6, 5 },
-  { 3, 63.5, 9, 10 },
-  { 1, 11.5, 11, 12 },
-  { 0, 9500.0, 13, 14 },
-  { 4, 111166.0, 5, 5 },
-  { 3, 55.5, 5, 5 },
-  { 4, 116166.0, 6, 6 },
-  { 3, 114.0, 6, 6 },
-  { 3, 63.5, 16, 17 },
-  { 1, 11.5, 18, 19 },
-  { 4, 116166.0, 20, 6 },
-  { 3, 56.5, 5, 5 },
-  { 3, 55.5, 5, 5 },
-  { 1, 11.5, 6, 6 },
-  { 3, 64.0, 22, 23 },
-  { 4, 111166.0, 24, 25 },
-  { 1, 11.5, 26, 27 },
-  { 3, 60.0, 5, 5 },
-  { 0, 500.0, 5, 6 },
-  { 3, 112.5, 6, 6 },
-  { 3, 106.5, 6, 6 },
-  { 3, 63.0, 29, 30 },
-  { 4, 111166.0, 31, 32 },
-  { 4, 116166.0, 33, 6 },
+  { 1, 11.5, 7, 7 },
+  { -1, 0, -1, -1 },
+  { 3, 63.0, 9, 10 },
+  { 0, 500.0, 12, 5 },
+  { 4, 116166.0, 11, 5 },
+  { 3, 112.5, 5, 5 },
+  { 3, 51.5, 7, 7 },
+  { 4, 111166.0, 14, 15 },
+  { 2, 1.5, 16, 5 },
+  { 2, 1.5, 17, 18 },
+  { 3, 67.5, 7, 5 },
+  { 4, 121111.5, 5, 5 },
+  { 2, 2.5, 5, 5 },
+  { 3, 63.0, 20, 21 },
+  { 3, 51.5, 7, 22 },
+  { 4, 116166.0, 23, 5 },
+  { 4, 111166.0, 7, 7 },
   { 1, 11.5, 5, 5 },
-  { 0, 500.0, 5, 6 },
-  { 4, 111216.0, 6, 5 },
-  { 3, 63.5, 35, 36 },
-  { 4, 111166.0, 37, 38 },
-  { 4, 116166.0, 39, 6 },
-  { 4, 111116.5, 5, 5 },
-  { 4, 121111.5, 5, 6 },
-  { 1, 11.5, 6, 6 },
-  { 0, 500.0, 41, 42 },
-  { 2, 1.5, 43, 44 },
-  { 3, 114.0, 45, 6 },
-  { 3, 63.0, 5, 6 },
-  { 1, 11.5, 6, 6 },
-  { 3, 111.0, 6, 5 },
-  { 0, 500.0, 47, 48 },
-  { 3, 63.0, 49, 50 },
-  { 2, 2.5, 51, 6 },
-  { 3, 51.5, 5, 5 },
-  { 3, 81.5, 6, 6 },
-  { 0, 6500.0, 6, 6 },
-  { 2, 1.5, 53, 54 },
-  { 0, 500.0, 57, 6 },
-  { 0, 9500.0, 55, 56 },
-  { 0, 1500.0, 6, 6 },
-  { 3, 114.0, 6, 6 },
-  { 4, 111166.0, 5, 6 },
-  { 4, 111166.0, 59, 60 },
-  { 3, 66.5, 61, 62 },
-  { 3, 54.5, 63, 64 },
-  { 3, 60.0, 5, 5 },
-  { 3, 106.5, 6, 6 },
-  { 4, 121111.5, 5, 6 },
-  { 4, 116166.0, 6, 6 },
-  { 3, 63.5, 66, 67 },
-  { 0, 500.0, 69, 6 },
-  { 4, 116166.0, 68, 6 },
-  { 3, 112.5, 6, 6 },
-  { 4, 111166.0, 5, 5 } 
+  { 3, 63.0, 25, 26 },
+  { 1, 11.5, 27, 28 },
+  { 4, 116166.0, 29, 5 },
+  { 4, 111166.0, 7, 7 },
+  { 3, 55.5, 7, 7 },
+  { 4, 111216.0, 5, 7 },
+  { 4, 111166.0, 31, 32 },
+  { 3, 66.5, 33, 34 },
+  { 4, 121111.5, 35, 5 },
+  { 1, 11.5, 7, 7 },
+  { 3, 106.5, 5, 5 },
+  { 0, 1500.0, 5, 7 },
+  { 3, 63.5, 37, 38 },
+  { 0, 500.0, 41, 5 },
+  { 1, 11.5, 39, 40 },
+  { 0, 11500.0, 5, 5 },
+  { 2, 1.5, 5, 5 },
+  { 3, 51.5, 7, 7 },
+  { 0, 500.0, 43, 44 },
+  { 2, 1.5, 45, 46 },
+  { 3, 114.0, 47, 5 },
+  { 1, 11.5, 7, 7 },
+  { 3, 116.0, 5, 5 },
+  { 3, 111.0, 5, 7 },
+  { 2, 1.5, 49, 50 },
+  { 1, 11.5, 51, 52 },
+  { 3, 114.0, 53, 5 },
+  { 4, 111166.0, 7, 5 },
+  { 0, 1000.0, 7, 5 },
+  { 4, 116166.0, 7, 5 },
+  { 4, 111166.0, 55, 56 },
+  { 2, 1.5, 59, 5 },
+  { 3, 54.5, 57, 58 },
+  { 4, 121111.5, 7, 5 },
+  { 0, 500.0, 5, 5 },
+  { 3, 67.5, 7, 5 },
+  { 2, 1.5, 61, 62 },
+  { 3, 63.5, 63, 64 },
+  { 3, 114.0, 65, 5 },
+  { 4, 111166.0, 7, 7 },
+  { 1, 11.5, 5, 5 },
+  { 3, 111.0, 5, 7 } 
 };
 
-int32_t rf_tree_roots[11] = { 0, 8, 15, 21, 28, 34, 40, 46, 52, 58, 65 };
+int32_t rf_tree_roots[11] = { 0, 8, 13, 19, 24, 30, 36, 42, 48, 54, 60 };
 
 EmlTrees rf = {
-        70,
+        66,
         rf_nodes,	  
         11,
         rf_tree_roots,
     };
 
 static inline int32_t rf_predict_tree_0(const float *features, int32_t features_length) {
-          if (features[0] < 500.0) {
-              if (features[4] < 111166.0) {
-                  if (features[2] < 1.5) {
+          if (features[3] < 63.5) {
+              if (features[0] < 500.0) {
+                  if (features[1] < 11.5) {
                       return 0;
+                  } else {
+                      return 0;
+                  }
+              } else {
+                  return 1;
+              }
+          } else {
+              if (features[1] < 11.5) {
+                  if (features[4] < 116166.0) {
+                      return 1;
                   } else {
                       return 1;
                   }
               } else {
-                  if (features[4] < 121111.5) {
+                  if (features[2] < 1.5) {
                       return 1;
                   } else {
                       return 1;
                   }
               }
-          } else {
-              if (features[3] < 114.0) {
-                  if (features[3] < 111.0) {
-                      return 1;
+          }
+        }
+        
+
+static inline int32_t rf_predict_tree_1(const float *features, int32_t features_length) {
+          if (features[3] < 63.0) {
+              if (features[0] < 500.0) {
+                  if (features[3] < 51.5) {
+                      return 0;
                   } else {
                       return 0;
+                  }
+              } else {
+                  return 1;
+              }
+          } else {
+              if (features[4] < 116166.0) {
+                  if (features[3] < 112.5) {
+                      return 1;
+                  } else {
+                      return 1;
                   }
               } else {
                   return 1;
@@ -115,30 +136,26 @@ static inline int32_t rf_predict_tree_0(const float *features, int32_t features_
         }
         
 
-static inline int32_t rf_predict_tree_1(const float *features, int32_t features_length) {
-          if (features[3] < 63.5) {
-              if (features[1] < 11.5) {
-                  if (features[4] < 111166.0) {
+static inline int32_t rf_predict_tree_2(const float *features, int32_t features_length) {
+          if (features[4] < 111166.0) {
+              if (features[2] < 1.5) {
+                  if (features[3] < 67.5) {
                       return 0;
                   } else {
-                      return 0;
+                      return 1;
                   }
               } else {
-                  if (features[3] < 55.5) {
-                      return 0;
-                  } else {
-                      return 0;
-                  }
+                  return 1;
               }
           } else {
-              if (features[0] < 9500.0) {
-                  if (features[4] < 116166.0) {
+              if (features[2] < 1.5) {
+                  if (features[4] < 121111.5) {
                       return 1;
                   } else {
                       return 1;
                   }
               } else {
-                  if (features[3] < 114.0) {
+                  if (features[2] < 2.5) {
                       return 1;
                   } else {
                       return 1;
@@ -148,16 +165,12 @@ static inline int32_t rf_predict_tree_1(const float *features, int32_t features_
         }
         
 
-static inline int32_t rf_predict_tree_2(const float *features, int32_t features_length) {
-          if (features[3] < 63.5) {
-              if (features[1] < 11.5) {
-                  if (features[3] < 56.5) {
-                      return 0;
-                  } else {
-                      return 0;
-                  }
+static inline int32_t rf_predict_tree_3(const float *features, int32_t features_length) {
+          if (features[3] < 63.0) {
+              if (features[3] < 51.5) {
+                  return 0;
               } else {
-                  if (features[3] < 55.5) {
+                  if (features[4] < 111166.0) {
                       return 0;
                   } else {
                       return 0;
@@ -177,52 +190,19 @@ static inline int32_t rf_predict_tree_2(const float *features, int32_t features_
         }
         
 
-static inline int32_t rf_predict_tree_3(const float *features, int32_t features_length) {
-          if (features[3] < 64.0) {
-              if (features[4] < 111166.0) {
-                  if (features[3] < 60.0) {
-                      return 0;
-                  } else {
-                      return 0;
-                  }
-              } else {
-                  if (features[0] < 500.0) {
-                      return 0;
-                  } else {
-                      return 1;
-                  }
-              }
-          } else {
-              if (features[1] < 11.5) {
-                  if (features[3] < 112.5) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
-              } else {
-                  if (features[3] < 106.5) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
-              }
-          }
-        }
-        
-
 static inline int32_t rf_predict_tree_4(const float *features, int32_t features_length) {
           if (features[3] < 63.0) {
-              if (features[4] < 111166.0) {
-                  if (features[1] < 11.5) {
+              if (features[1] < 11.5) {
+                  if (features[4] < 111166.0) {
                       return 0;
                   } else {
                       return 0;
                   }
               } else {
-                  if (features[0] < 500.0) {
+                  if (features[3] < 55.5) {
                       return 0;
                   } else {
-                      return 1;
+                      return 0;
                   }
               }
           } else {
@@ -240,26 +220,26 @@ static inline int32_t rf_predict_tree_4(const float *features, int32_t features_
         
 
 static inline int32_t rf_predict_tree_5(const float *features, int32_t features_length) {
-          if (features[3] < 63.5) {
-              if (features[4] < 111166.0) {
-                  if (features[4] < 111116.5) {
+          if (features[4] < 111166.0) {
+              if (features[3] < 66.5) {
+                  if (features[1] < 11.5) {
                       return 0;
                   } else {
                       return 0;
                   }
               } else {
-                  if (features[4] < 121111.5) {
-                      return 0;
+                  if (features[3] < 106.5) {
+                      return 1;
                   } else {
                       return 1;
                   }
               }
           } else {
-              if (features[4] < 116166.0) {
-                  if (features[1] < 11.5) {
+              if (features[4] < 121111.5) {
+                  if (features[0] < 1500.0) {
                       return 1;
                   } else {
-                      return 1;
+                      return 0;
                   }
               } else {
                   return 1;
@@ -269,15 +249,44 @@ static inline int32_t rf_predict_tree_5(const float *features, int32_t features_
         
 
 static inline int32_t rf_predict_tree_6(const float *features, int32_t features_length) {
-          if (features[0] < 500.0) {
-              if (features[2] < 1.5) {
-                  if (features[3] < 63.0) {
+          if (features[3] < 63.5) {
+              if (features[0] < 500.0) {
+                  if (features[3] < 51.5) {
                       return 0;
+                  } else {
+                      return 0;
+                  }
+              } else {
+                  return 1;
+              }
+          } else {
+              if (features[1] < 11.5) {
+                  if (features[0] < 11500.0) {
+                      return 1;
                   } else {
                       return 1;
                   }
               } else {
+                  if (features[2] < 1.5) {
+                      return 1;
+                  } else {
+                      return 1;
+                  }
+              }
+          }
+        }
+        
+
+static inline int32_t rf_predict_tree_7(const float *features, int32_t features_length) {
+          if (features[0] < 500.0) {
+              if (features[2] < 1.5) {
                   if (features[1] < 11.5) {
+                      return 0;
+                  } else {
+                      return 0;
+                  }
+              } else {
+                  if (features[3] < 116.0) {
                       return 1;
                   } else {
                       return 1;
@@ -297,59 +306,30 @@ static inline int32_t rf_predict_tree_6(const float *features, int32_t features_
         }
         
 
-static inline int32_t rf_predict_tree_7(const float *features, int32_t features_length) {
-          if (features[0] < 500.0) {
-              if (features[3] < 63.0) {
-                  if (features[3] < 51.5) {
-                      return 0;
-                  } else {
-                      return 0;
-                  }
-              } else {
-                  if (features[3] < 81.5) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
-              }
-          } else {
-              if (features[2] < 2.5) {
-                  if (features[0] < 6500.0) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
-              } else {
-                  return 1;
-              }
-          }
-        }
-        
-
 static inline int32_t rf_predict_tree_8(const float *features, int32_t features_length) {
           if (features[2] < 1.5) {
-              if (features[0] < 500.0) {
+              if (features[1] < 11.5) {
                   if (features[4] < 111166.0) {
                       return 0;
                   } else {
                       return 1;
                   }
               } else {
-                  return 1;
+                  if (features[0] < 1000.0) {
+                      return 0;
+                  } else {
+                      return 1;
+                  }
               }
           } else {
-              if (features[0] < 9500.0) {
-                  if (features[0] < 1500.0) {
-                      return 1;
+              if (features[3] < 114.0) {
+                  if (features[4] < 116166.0) {
+                      return 0;
                   } else {
                       return 1;
                   }
               } else {
-                  if (features[3] < 114.0) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
+                  return 1;
               }
           }
         }
@@ -357,18 +337,14 @@ static inline int32_t rf_predict_tree_8(const float *features, int32_t features_
 
 static inline int32_t rf_predict_tree_9(const float *features, int32_t features_length) {
           if (features[4] < 111166.0) {
-              if (features[3] < 66.5) {
-                  if (features[3] < 60.0) {
+              if (features[2] < 1.5) {
+                  if (features[3] < 67.5) {
                       return 0;
                   } else {
-                      return 0;
+                      return 1;
                   }
               } else {
-                  if (features[3] < 106.5) {
-                      return 1;
-                  } else {
-                      return 1;
-                  }
+                  return 1;
               }
           } else {
               if (features[3] < 54.5) {
@@ -378,7 +354,7 @@ static inline int32_t rf_predict_tree_9(const float *features, int32_t features_
                       return 1;
                   }
               } else {
-                  if (features[4] < 116166.0) {
+                  if (features[0] < 500.0) {
                       return 1;
                   } else {
                       return 1;
@@ -389,22 +365,26 @@ static inline int32_t rf_predict_tree_9(const float *features, int32_t features_
         
 
 static inline int32_t rf_predict_tree_10(const float *features, int32_t features_length) {
-          if (features[3] < 63.5) {
-              if (features[0] < 500.0) {
+          if (features[2] < 1.5) {
+              if (features[3] < 63.5) {
                   if (features[4] < 111166.0) {
                       return 0;
                   } else {
                       return 0;
                   }
               } else {
-                  return 1;
-              }
-          } else {
-              if (features[4] < 116166.0) {
-                  if (features[3] < 112.5) {
+                  if (features[1] < 11.5) {
                       return 1;
                   } else {
                       return 1;
+                  }
+              }
+          } else {
+              if (features[3] < 114.0) {
+                  if (features[3] < 111.0) {
+                      return 1;
+                  } else {
+                      return 0;
                   }
               } else {
                   return 1;
