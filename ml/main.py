@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sn
 import numpy as np
 import rf_gen_PY
-import rf_gen_C
+#import rf_gen_C
+import rf_gen_C_new
 
 def convert_bytes(size):
     if 'M' in size:
@@ -128,6 +129,17 @@ def dataset_statistics(file_name,file2 = None):
     data = data[~((data['Proto'] == 6) & (data['attackDescription'] != 2) & (data['attackDescription'] != 3) & (data['attackDescription'] != 4) & (data['label'] == 'attacker'))]
     data = data[~(((data['Proto'] == 17) & (data['attackDescription'] != 1) & (data['label'] == 'attacker')))]
 
+    udp = data[(data['attackDescription'] == 1)]
+    fin = data[(data['attackDescription'] == 2)]
+    syn = data[(data['attackDescription'] == 3)]
+    ack = data[(data['attackDescription'] == 4)]
+    normal = data[(data['attackDescription'] == 0)]
+    print(udp['Flags'].value_counts())
+    print(fin['Flags'].value_counts())
+    print(syn['Flags'].value_counts())
+    print(ack['Flags'].value_counts())
+    print(normal['Flags'].value_counts())
+
     print()
     print("Number of packets in attacks")
     npackets = data[(data['label'] == 'attacker')]
@@ -200,7 +212,7 @@ def dataset_processing(save=False):
 
 def train_model(X,Y,n_trees,max_depth):
 
-    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
 
     rf_Model = RandomForestClassifier()
     rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True,random_state=1122)
@@ -343,9 +355,9 @@ def evaluate_balance(file_path):
     votes = [0,0]
 
     for line in lines:
-        if "return 1;" in line:
+        if "votes[1] += 1" in line:
             votes[1] += 1
-        if "return 0;" in line:
+        if "votes[0] += 1" in line:
             votes[0] += 1
 
     print(votes)
@@ -370,7 +382,7 @@ def main():
     rf_Model = train_model(X,Y,n_trees,max_depth)
 
     model_to_C(rf_Model,emlearn_file)
-    rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
+    rf_gen_C_new.generate_C_code(emlearn_file,'rf_model.h',n_trees)
     rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)
 
     evaluate_balance('rf_model.h')
