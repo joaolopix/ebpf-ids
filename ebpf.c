@@ -70,6 +70,7 @@ static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,
 
 	pkt->port16[0] = udp_header->source;
 	pkt->port16[1] = udp_header->dest;
+
 	return true;
 }
 
@@ -139,7 +140,7 @@ static __always_inline bool parse_l4data(pkt_data *pkt,void *data, void *data_en
             return false;
     }
     else if(pkt->l4_proto == IPPROTO_UDP){
-        if(!parse_tcp(pkt,data,data_end,offset))
+        if(!parse_udp(pkt,data,data_end,offset))
             return false;
     }
     else{
@@ -240,7 +241,8 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
             if(pkt->flags[i])
                 value->flags[i] = 2;
             current_flags = current_flags + value->flags[i];
-            current_flags = current_flags * 10;
+            if(i!=sizeof(value->flags)/sizeof(__u64)-1)
+                current_flags = current_flags * 10;
         }
         __u64 prev_scan_pred =  value->scan;
         if(MODEL_MODE)
@@ -268,12 +270,13 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         new.scan_counter = 0;
         int current_flags = 0;
         for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
-            if(pkt->flags[i])
+            if(pkt->flags[i]==1)
                 new.flags[i] = 2;
             else
                 new.flags[i] = 1;
             current_flags = current_flags + new.flags[i];
-            current_flags = current_flags * 10;
+            if(i!=sizeof(new.flags)/sizeof(__u64)-1)
+                current_flags = current_flags * 10;
         }
         if(MODEL_MODE)
             new.scan = predict_MAP(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
