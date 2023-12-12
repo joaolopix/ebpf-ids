@@ -64,7 +64,7 @@ BPF_PERF_OUTPUT(output);
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
 	struct udphdr *udp_header = data + *offset;
-    *offset += sizeof(struct tcphdr);
+    *offset += sizeof(struct udphdr);
 	if (data + *offset > data_end)
         return false;
 
