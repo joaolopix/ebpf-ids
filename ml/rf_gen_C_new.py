@@ -30,7 +30,7 @@ def extract_and_copy(source_file_path, dest_file_path, start_pattern_trees, end_
     content = content.rsplit('}', 1)[0]
     content += "\r\tint most_voted_class = -1;\n" \
                "\tint most_voted_votes = 0;\n" \
-               "\tfor (int i=0; i<2; i++) {\n" \
+               "\tfor (int i=0; i<sizeof(votes)/sizeof(int); i++) {\n" \
                "\t\tif (votes[i] > most_voted_votes) {\n" \
                "\t\t\tmost_voted_class = i;\n" \
                "\t\t\tmost_voted_votes = votes[i];\n" \

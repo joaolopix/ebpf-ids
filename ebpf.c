@@ -194,21 +194,15 @@ static __always_inline int predict_MAP(__u64 duration,__u16 protocol,__u64 packe
                             votes[node->value] += 1;
                             break;
                         }
-                        else
-                            continue;
                     }
                 }
-                else
-                   continue;
             }
-        }
-        else
-            continue;    
+        } 
     }
 
     int most_voted_class = -1;
     int most_voted_votes = 0;
-    for (int i=0; i<2; i++) {
+    for (int i=0; i<sizeof(votes)/sizeof(int); i++) {
 
         if (votes[i] > most_voted_votes) {
             most_voted_class = i;
