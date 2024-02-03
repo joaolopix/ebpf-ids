@@ -4,14 +4,14 @@ import time
 import socket
 import ctypes
 import rf_model as rf_model
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 
 def usage():
     print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [LISTEN MODE]")
     print("\nXDP MODE:")
     print("\t-S: use skb / generic mode")
-    print("\t-D: use driver mode")
+    print("\t-D: use driver / native mode")
     print("\t-H: use hardware offload mode")
     print("ML MODEL MODE:")
     print("\t-C: C compiled model mode")
@@ -23,7 +23,7 @@ def usage():
     print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Up\n")
 
 def check_input_args():
-    if len(sys.argv) < 4:
+    if len(sys.argv) < 5:
         usage()
         return 1
     return 0
@@ -87,12 +87,11 @@ def listen(b,mode):
 
         src_ip = convert_ip_to_string(e.src_ip)
         dst_ip = convert_ip_to_string(e.dst_ip)
+        current_datetime = datetime.fromtimestamp(time.time()-e.timestamp)
         dst_port = socket.ntohs(e.dst_port)
-        current_datetime = datetime.fromtimestamp(time.time())
-        if e.type == 0:
-            print("{} - ALERT: Possible Port Scan detected from {} to {}:{}".format(current_datetime,src_ip,dst_ip,dst_port))
-        elif e.type == 1:
-            print("{} - INFO: Flow from {} to {}:{} has been declassified".format(current_datetime,src_ip,dst_ip,dst_port))
+        portscan_type = ["Vertical","Horizontal","Block"]
+        print("{} - ALERT: {} Port Scan detected from {} to {}:{}".format(current_datetime,portscan_type[e.type],src_ip,dst_ip,dst_port))
+            
   
     def print_flowtable():
         print("\n\nTable size: "+ str(len(b["flow_table"])) + "\n")
@@ -115,7 +114,7 @@ def listen(b,mode):
             scan_to_str = ['yes','no']
             scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
             
-            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} % '
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} %'
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
             
     if mode == 2:
@@ -125,14 +124,14 @@ def listen(b,mode):
         while True:
             if mode == 1:
                 time.sleep(2) 
-                print_flowtable()
+                print_flowtable()   
             elif mode == 2:
                 b.perf_buffer_poll()
             else:
                 b.trace_print()
 
     except KeyboardInterrupt:
-       return
+        return
         
 def main():
     if check_input_args():
@@ -157,7 +156,7 @@ def main():
     n_nodes = len(rf_model.rf_nodes)
     mtd = rf_model.max_tree_depth
 
-    b = BPF(text=ebpf_str, device=offloaded_device,cflags=[f"-DN_TREES={n_trees}",f"-DN_NODES={n_nodes}",f"-DMAX_TREE_DEPTH={mtd}",f"-DMODEL_MODE={ml_mode}"])
+    b = BPF(text=ebpf_str, device=offloaded_device,cflags=[f"-DN_TREES={n_trees}",f"-DN_NODES={n_nodes}",f"-DMAX_TREE_DEPTH={mtd}",f"-DMODEL_MODE={ml_mode}",f"-DPS_THRESHOLD={5}"])
     fn = b.load_func("ebpf_main", mode, device=offloaded_device)
     print("EBPF-IDS: CODE LOADED")
 

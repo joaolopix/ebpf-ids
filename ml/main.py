@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sn
 import numpy as np
 import rf_gen_PY
-#import rf_gen_C
-import rf_gen_C_new
+import rf_gen_C
 
 def convert_bytes(size):
     if 'M' in size:
@@ -302,6 +301,7 @@ def evaluate_ntrees(X, Y, min_trees, max_trees, step_size):
     plt.plot(n_trees_range, f1_scores, label='F1 Score')
     plt.plot(n_trees_range, oob_scores, label='OOB Score')
 
+    plt.xticks([0,5,11,20,30,40,50,60,70,80,90,100])
     plt.xlabel('Number of Trees')
     plt.ylabel('Score')
     plt.title('Random Forest Performance vs. Number of Trees')
@@ -341,7 +341,8 @@ def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees):
     plt.plot(d_range, f1_scores, label='F1 Score')
     plt.plot(d_range, oob_scores, label='OOB Score')
 
-    plt.xlabel('Number of Trees')
+    plt.xticks([0, 1, 3, 10, 20, 30, 40, 50])
+    plt.xlabel('Tree Depth')
     plt.ylabel('Score')
     plt.title('Random Forest Performance vs. Tree Depth')
     plt.legend()
@@ -382,10 +383,11 @@ def main():
     rf_Model = train_model(X,Y,n_trees,max_depth)
 
     model_to_C(rf_Model,emlearn_file)
-    rf_gen_C_new.generate_C_code(emlearn_file,'rf_model.h',n_trees)
+    rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
     rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)
 
-    evaluate_balance('rf_model.h')
+    #evaluate_balance('rf_model.h')
+
 
 if __name__ == "__main__":
      main()
