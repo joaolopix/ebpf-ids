@@ -308,12 +308,14 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
     ps_index current_ps = {fk.dst_ip,fk.dst_port,fk.src_port,bpf_ktime_get_boot_ns()};
 
     if(value){ 
-        // is this flow already stored ? if so we update it, also update type of portscan
+        // is this flow already stored ? if so we update it
+        // update type of portscan in case it is a new one
         bool found = false;
         int ps_type = 0; // vertical
         for(int i = 0; i < sizeof(value->scans)/sizeof(ps_index); i++){
             if(value->scans[i].dst_ip == fk.dst_ip && value->scans[i].dst_port == fk.dst_port && value->scans[i].src_port == fk.src_port){
                 value->scans[i] = current_ps;
+                return 0;
             }
             if(value->scans[0].dst_ip != value->scans[i].dst_ip || fk.dst_ip != value->scans[i].dst_ip){
                 ps_type = 1; // horizontal
@@ -321,7 +323,7 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             if( (value->scans[0].dst_port != value->scans[i].dst_port || fk.dst_port != value->scans[i].dst_port) && ps_type == 1){
                 ps_type = 2; // block
             }
-            if(i+1==value->index_counter)
+            if(i+1==value->index_counter) // reached the number of stored scans no need for checking further
                 break;
         }
         value->ps_type = ps_type;
@@ -329,8 +331,15 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
         // threshold already achieved and its not a already existing flow
         if(value->index_counter == PS_THRESHOLD)
             return 2;
-        // new flow, add it
+        // new flow, add it (bounds check)
         if(value->index_counter < sizeof(value->scans)/sizeof(ps_index) && value->index_counter >= 0){
+            // check if the previous scan is within the establish time interval , if not remove them
+            int previous_index = (value->index_counter)-1;
+            if(previous_index < sizeof(value->scans)/sizeof(ps_index) && previous_index >= 0){
+                if(current_ps.timestamp-value->scans[previous_index].timestamp > PS_DELAY){
+                    value->index_counter = 0;
+                }
+            }
             value->scans[value->index_counter] = current_ps;
             value->index_counter += 1;
             // did we reach the limit when adding this new flow ?
@@ -380,7 +389,7 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_v
     if(event_type == 1){
         for(int i = 0; i < sizeof(psv.scans)/sizeof(ps_index); i++){
             e.dst_port= psv.scans[i].dst_port;
-            e.timestamp = (bpf_ktime_get_boot_ns() - psv.scans[i].timestamp)/1000000000; // convert to s to be handled in int, perf cannot receive __u64
+            e.timestamp = (bpf_ktime_get_ns() - psv.scans[i].timestamp)/1000000000; // convert to seconds to be handled in int, perf cannot receive __u64
             output.perf_submit(ctx, &e, sizeof(event));
         }
         return;
