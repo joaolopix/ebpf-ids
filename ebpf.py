@@ -4,11 +4,14 @@ import time
 import socket
 import ctypes
 import rf_model as rf_model
-from datetime import datetime, timedelta
+from datetime import datetime
 import math
+import sys
+import queue
+import threading
 
 def usage():
-    print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [LISTEN MODE] [OPTIONAL PARAMETERS]")
+    print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [OUTPUT MODE] [OPTIONAL PARAMETERS]")
     print("\nXDP MODE:")
     print("\t-S: use skb / generic mode")
     print("\t-D: use driver / native mode")
@@ -16,15 +19,16 @@ def usage():
     print("ML MODEL MODE:")
     print("\t-C: C compiled model mode")
     print("\t-M: MAPs stored model mode")
-    print("LISTEN MODE:")
-    print("\t-Ul: Userspace mode showing Logs from Perf Output")
+    print("OUTPUT MODE:")
+    print("\t-Lv: Logs from Perf Output (Verbose)")
+    print("\t-Ls: Logs from Perf Output (Simple)")
     print("\t-Up: Userspace mode showing Port Scan Table")
     print("\t-Uf: Userspace mode showing Flows")
-    print("\t-K: Kernel mode showing bpf_trace_printk (used for debugging)")
+    print("\t-K: Kernel mode showing bpf_trace_printk (for debugging ebpf)")
     print("OPTIONAL:")
     print("\t--scan_attempts: Number of scan attempts to infer a Port Scan (Default: 25)")
     print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 600 sec)")
-    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Ul\n")
+    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Lv\n")
 
 def check_input_argv():
     if len(sys.argv) == 5:
@@ -121,8 +125,10 @@ def get_listen_mode():
         return 1
     if "-Up" == sys.argv[4]:
         return 2
-    if "-Ul" == sys.argv[4]:
+    if "-Lv" == sys.argv[4]:
         return 3
+    if "-Ls" == sys.argv[4]:
+        return 4
     return mode
 
 def read_ebpf_file(src):
@@ -152,20 +158,92 @@ def set_model_map(b):
 
 def listen(b,mode):
 
+    def queue_event_data():
+        while run:
+            event = q.get()
+            if event is None:
+                return
+            print_queued_event_data(event)
+    
+    def print_queued_event_data(event):
+        d = {event["src_ip"]:{  event["dst_ip"]:{   "ports": [event["dst_port"]],
+                                                    "start": event["current_datetime"],
+                                                    "last": event["current_datetime"]
+                                                },
+                                "scan_method":event["portscan_type"],
+                                "alert_time":event["current_datetime"]
+                            }
+            }
+        time.sleep(2) # give queue time to fill up
+        while True:
+            try:
+                item = q.get(timeout=0)
+                if item is None:
+                    break
+                if item["src_ip"] not in d.keys():
+                    value = {item["dst_ip"]:{   "ports": [item["dst_port"]],
+                                                "start": item["current_datetime"],
+                                                "last": item["current_datetime"]
+                                                },
+                                "scan_method":item["portscan_type"],
+                                "alert_time":item["current_datetime"]}
+                    d[item["src_ip"]] = value
+                else:
+                    if item["dst_ip"] not in d[item["src_ip"]].keys():
+                        value = {   "ports": [item["dst_port"]],
+                                    "start": event["current_datetime"],
+                                    "last": event["current_datetime"]
+                                }
+                        d[item["src_ip"]][item["dst_ip"]] = value               
+                    else:                     
+                        d[item["src_ip"]][item["dst_ip"]]["ports"]+=[item["dst_port"]]
+                        d[item["src_ip"]][item["dst_ip"]]["last"]= item["current_datetime"]
+
+            except queue.Empty:
+                for k,v in d.items():
+                    print("{} - ALERT . Port Scan detected from {}".format(v["alert_time"],k))
+                    print("{:<34s} |___ Scan Method: {}".format(" ",v["scan_method"]))
+                    for j,i in v.items():
+                        if j not in ["scan_method", "alert_time"]:
+                            print("{:<34s} | |___Target IP: {}".format(" ",j))
+                            port_count = len(i["ports"])
+                            ports = [min(i["ports"]),max(i["ports"])]
+                            if port_count == 1 or ports[0] == ports[1]:
+                                print("{:<34s} | | |___ Scan Attempts: {}".format(" ",port_count))
+                                print("{:<34s} | | |___ Target Port: {}".format(" ",ports[0]))
+                            else:
+                                print("{:<34s} | | |___ Scan Attempts: {}".format(" ",port_count))
+                                print("{:<34s} | | |___ Target Ports: [{}-{}]".format(" ",ports[0],ports[1]))
+                            print("{:<34s} | | |___ Duration Time: {}".format(" ",i["last"]-i["start"]))
+                break
+
     def print_event_data(cpu, data, size):
-        e = b["output"].event(data)
 
-        def convert_ip_to_string(ip_integer):
-            ip_integer = ip_integer & 0xFFFFFFFF
-            return socket.inet_ntoa(ip_integer.to_bytes(4, byteorder='little'))
+        class Event(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_int),
+                ("src_ip", ctypes.c_uint32),
+                ("dst_ip", ctypes.c_uint32),
+                ("dst_port", ctypes.c_uint16),
+                ("timestamp", ctypes.c_uint64)]
 
-        src_ip = convert_ip_to_string(e.src_ip)
-        dst_ip = convert_ip_to_string(e.dst_ip)
-        current_datetime = datetime.fromtimestamp(time.time()-e.timestamp)
+        e = ctypes.cast(data,ctypes.POINTER(Event)).contents
+
+        src_ip = socket.inet_ntoa(e.src_ip.to_bytes(4, byteorder='little'))
+        dst_ip = socket.inet_ntoa(e.dst_ip.to_bytes(4, byteorder='little'))
+        current_datetime = datetime.fromtimestamp(time.time()-(e.timestamp/1e9))
         dst_port = socket.ntohs(e.dst_port)
         portscan_type = ["Vertical","Horizontal","Block"]
-        print("{} - ALERT: {} Port Scan detected from {} to {}:{}".format(current_datetime,portscan_type[e.type],src_ip,dst_ip,dst_port))
-            
+
+        if mode == 3:
+            print("{} - ALERT: {} Port Scan detected from {} to {}:{}".format(current_datetime,portscan_type[e.type],src_ip,dst_ip,dst_port))
+        elif mode == 4:
+            event = {"src_ip":src_ip,
+                    "dst_ip":dst_ip, 
+                    "current_datetime":current_datetime,
+                    "dst_port":dst_port, 
+                    "portscan_type":portscan_type[e.type]}
+            q.put(event)    
+           
     def print_flowtable():
         print("\n\n" + "_"*123 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*123)
         print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} '
@@ -203,10 +281,45 @@ def listen(b,mode):
                 print('| {:<6} | {:<15s}:{:<6} \n{:<15s} '.format(src_port, dst_ip, dst_port," "),end='')
             print("\r"+"_"*50)
 
+    def perf_output_error(value):
+        q_lost.put(value)
+        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(0) # events cant be generated
+    
+    def queue_lost_data():
+        while run:
+            value = q_lost.get()
+            if value is None:
+                return
+            print_queued_error_data(value)
 
-    if mode == 3:
-        b["output"].open_perf_buffer(print_event_data)
-
+    def print_queued_error_data(value):
+        time.sleep(3) # give queue time to fill up
+        total = value
+        while True:
+            try:
+                value = q_lost.get(timeout=0)
+                if value is None:
+                    break
+                total += value
+            except queue.Empty:
+                print("\nEBPF-IDS: ERROR - PERF OUTPUT AS REACHED MAXIMUM CAPACITY, %d POSSIBILITY LOST SAMPLES, STOPPED EVENTS SUBMISSION" % (total))
+                break
+        time.sleep(2)
+        print("EBPF-IDS: RESTARTING PERF OUTPUT\n")
+        time.sleep(1)
+        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events cant be generated
+    
+    if mode == 3 or mode == 4:
+        b["output"].open_perf_buffer(print_event_data,lost_cb=perf_output_error)
+        run = True
+        q_lost = queue.Queue()
+        lost_sample_thread = threading.Thread(target=queue_lost_data)
+        lost_sample_thread.start()
+        if mode == 4:
+            q = queue.Queue()
+            q_thread = threading.Thread(target=queue_event_data)
+            q_thread.start()   
+    
     try:
         while True:
             if mode == 1:
@@ -215,12 +328,20 @@ def listen(b,mode):
             elif mode == 2:
                 time.sleep(2) 
                 print_pstable() 
-            elif mode == 3:
+            elif mode == 3 or mode == 4:
                 b.perf_buffer_poll()
             else:
                 b.trace_print()
 
     except KeyboardInterrupt:
+        if mode == 3 or mode == 4:
+            run = False
+            q_lost.put(None)
+            lost_sample_thread.join()
+            if mode == 4:
+                q.put(None)
+                q_lost.put(None)
+                q_thread.join()
         return
         
 def main():
@@ -258,6 +379,8 @@ def main():
     if(ml_mode):
         set_model_map(b)
         print("EBPF-IDS: ML MODEL LOADED")
+
+    b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events can be generated
 
     b.attach_xdp(device, fn, flags)
     print("EBPF-IDS: ATTACHED\n")

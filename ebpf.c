@@ -48,10 +48,10 @@ typedef struct tree_node {
 
 typedef struct event {
     int type;
-    int src_ip;
-    int dst_ip;
-    int dst_port;
-    int timestamp; // optional, adjust timestamp in userspace, used for stored flows
+    __u32 src_ip;
+    __u32 dst_ip;
+    __u16 dst_port;
+    __u64 timestamp; // optional, adjust timestamp in userspace, used for stored flows
 } event;
 
 typedef struct ps_index {
@@ -71,6 +71,7 @@ BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 1000);
 BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("hash", int, int, tree_roots, N_TREES);
 BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 1000);
+BPF_TABLE("array", int, int, event_flag, 1);
 BPF_PERF_OUTPUT(output);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
@@ -329,8 +330,10 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
         value->ps_type = ps_type;
 
         // threshold already achieved and its not a already existing flow
-        if(value->index_counter == PS_THRESHOLD)
+        if(value->index_counter == PS_THRESHOLD){
+            *psv = *value;
             return 2;
+        }
         // new flow, add it (bounds check)
         if(value->index_counter < sizeof(value->scans)/sizeof(ps_index) && value->index_counter >= 0){
             // check if the previous scan is within the establish time interval , if not remove them
@@ -382,6 +385,19 @@ static __always_inline void ps_table_remove(flow_key fk){
     }
 }
 
+static __always_inline bool perf_output_capable(){
+
+    int key = 0;
+    int *value = event_flag.lookup(&key);
+    if(value){
+        if(*value == 1)
+            return true;
+        else
+            return false;
+    }
+    return false;
+}
+
 static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_value fv, ps_value psv,int event_type){
 
     event e = {psv.ps_type,fk.src_ip,fk.dst_ip,0};
@@ -389,8 +405,9 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_v
     if(event_type == 1){
         for(int i = 0; i < sizeof(psv.scans)/sizeof(ps_index); i++){
             e.dst_port= psv.scans[i].dst_port;
-            e.timestamp = (bpf_ktime_get_ns() - psv.scans[i].timestamp)/1000000000; // convert to seconds to be handled in int, perf cannot receive __u64
-            output.perf_submit(ctx, &e, sizeof(event));
+            e.timestamp = (bpf_ktime_get_ns() - psv.scans[i].timestamp);
+            if(perf_output_capable())
+                output.perf_submit(ctx, &e, sizeof(event));
         }
         return;
     }
@@ -398,8 +415,9 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_v
     if(event_type == 2){
         e.dst_port = fk.dst_port;
     }
+    if(perf_output_capable())
+        output.perf_submit(ctx, &e, sizeof(event));
 
-    output.perf_submit(ctx, &e, sizeof(event));
 }
 
 int ebpf_main(struct xdp_md *ctx) {
