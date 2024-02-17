@@ -26,6 +26,7 @@ typedef struct flow_value {
     // end of features
     __u64 scan; // 0 scan, 1 normal
     __u64 scan_counter; // counts how many times has it been classified as a scan
+    __u64 suspicious; // 0 normal ; 1 change from scan to normal; 2 no longer suspicous , used to trigger deletion of portscan_table
 }flow_value;
 
 typedef struct pkt_data {
@@ -48,29 +49,27 @@ typedef struct tree_node {
 
 typedef struct event {
     int type;
+    int ps_method;
     __u32 src_ip;
     __u32 dst_ip;
     __u16 dst_port;
-    __u64 timestamp; // optional, adjust timestamp in userspace, used for stored flows
+    __u16 src_port;
 } event;
 
-typedef struct ps_index {
-    __u32 dst_ip;
-    __u16 dst_port;
-    __u16 src_port;
-    __u64 timestamp;    
-} ps_index;
-
 typedef struct ps_value {
-    ps_index scans[PS_THRESHOLD];
-    int index_counter;
+    __u32 dst_ip; // used to calculate ps_type
+    __u16 dst_port; // used to calculate ps_type
+    __u64 timestamp; // used to compare to PS_DELAY
+    int ps_counter;
     int ps_type; // 0 vertical, 1 horizontal, 2 block
 } ps_value;
 
-BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 1000);
-BPF_TABLE("hash", int, tree_node, tree_nodes, N_NODES);
-BPF_TABLE("hash", int, int, tree_roots, N_TREES);
-BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 1000);
+BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 500);
+BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 100);
+
+BPF_TABLE("array", int, tree_node, tree_nodes, N_NODES);
+BPF_TABLE("array", int, int, tree_roots, N_TREES);
+
 BPF_TABLE("array", int, int, event_flag, 1);
 BPF_PERF_OUTPUT(output);
 
@@ -252,14 +251,24 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
                 current_flags = current_flags * 10;
         }
 
-        if(MODEL_MODE) // MODEL_MODE 1 = via Maps
+        __u64 prev_pred = value->scan;
+        if(MODEL_MODE) // MODEL_MODE 1 = via ebpf Maps
             value->scan = predict_MAP(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
         else
             value->scan = predict_C(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
 
-         if(!value->scan)
+        if(prev_pred == 0 && value->scan != prev_pred) // flow was classifed as a scan previously and it changed to normal
+            value->suspicious = 1;
+
+        if(!value->scan)
             value->scan_counter += 1;
-     
+
+        if(value->suspicious == 2)
+            value->suspicious = 0; // remove trigger
+        if(value->scan_counter*100/value->packet_counter <= 5 && value->suspicious == 1) // no longer suspicious
+            value->suspicious = 2; // trigger deletion event from portscan_table
+        
+
         *fv = *value;
     } 
     else {
@@ -270,6 +279,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         new.timestamp = bpf_ktime_get_ns();
         new.duration = 0;
         new.scan_counter = 0;
+        new.suspicious = 0;
         int current_flags = 0;
 
         for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
@@ -299,54 +309,40 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
 }
 
 static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *psv){
-    /*
-    returns 0 if a scan was received but did not reach the treshhold
-    returns 1 if threshold as been hit and all stored scans need to be printed
-    returns 2 if threshold had already been reached and its new scan
-    */
+    
+    //returns 0 if a scan was received but did not reach the treshhold
+    //returns 1 if threshold as been hit 
+    //returns -2 if existing flows were deleted and we must restart count from this one
+
     __u32 key = fk.src_ip;
     ps_value *value = portscan_table.lookup(&key);
-    ps_index current_ps = {fk.dst_ip,fk.dst_port,fk.src_port,bpf_ktime_get_boot_ns()};
 
     if(value){ 
-        // is this flow already stored ? if so we update it
-        // update type of portscan in case it is a new one
-        bool found = false;
-        int ps_type = 0; // vertical
-        for(int i = 0; i < sizeof(value->scans)/sizeof(ps_index); i++){
-            if(value->scans[i].dst_ip == fk.dst_ip && value->scans[i].dst_port == fk.dst_port && value->scans[i].src_port == fk.src_port){
-                value->scans[i] = current_ps;
-                return 0;
-            }
-            if(value->scans[0].dst_ip != value->scans[i].dst_ip || fk.dst_ip != value->scans[i].dst_ip){
-                ps_type = 1; // horizontal
-            }
-            if( (value->scans[0].dst_port != value->scans[i].dst_port || fk.dst_port != value->scans[i].dst_port) && ps_type == 1){
-                ps_type = 2; // block
-            }
-            if(i+1==value->index_counter) // reached the number of stored scans no need for checking further
-                break;
-        }
-        value->ps_type = ps_type;
 
-        // threshold already achieved and its not a already existing flow
-        if(value->index_counter == PS_THRESHOLD){
+        if(fv.timestamp - value->timestamp > PS_DELAY){
+            value->dst_ip = fk.dst_ip;
+            value->dst_port = fk.dst_port;
+            value->timestamp = fv.timestamp;
+            value->ps_counter = 1;
+            value->ps_type = 0;
             *psv = *value;
-            return 2;
+            return -2;
         }
-        // new flow, add it (bounds check)
-        if(value->index_counter < sizeof(value->scans)/sizeof(ps_index) && value->index_counter >= 0){
-            // check if the previous scan is within the establish time interval , if not remove them
-            int previous_index = (value->index_counter)-1;
-            if(previous_index < sizeof(value->scans)/sizeof(ps_index) && previous_index >= 0){
-                if(current_ps.timestamp-value->scans[previous_index].timestamp > PS_DELAY){
-                    value->index_counter = 0;
-                }
-            }
-            value->scans[value->index_counter] = current_ps;
-            value->index_counter += 1;
-            // did we reach the limit when adding this new flow ?
-            if(value->index_counter == PS_THRESHOLD){
+        else{
+            value->timestamp = fv.timestamp;
+
+            value->ps_counter += 1;
+            
+            if(value->dst_ip != fk.dst_ip)
+                value->ps_type = 1; // horizontal
+            if(value->ps_type == 1 && value->dst_port != fk.dst_port)
+                value->ps_type = 2; //block
+
+            value->dst_ip = fk.dst_ip;
+            value->dst_port = fk.dst_port;
+            value->timestamp = fv.timestamp; 
+
+            if(value->ps_counter >= PS_THRESHOLD){
                 *psv = *value;
                 return 1;
             }
@@ -354,11 +350,14 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
     }
     else{
         ps_value new = {};
-        new.scans[0] = current_ps;
-        new.index_counter += 1;
+        new.dst_ip = fk.dst_ip;
+        new.dst_port = fk.dst_port;
+        new.timestamp = fv.timestamp;
+        new.ps_counter = 1;
+        new.ps_type = 0;
         portscan_table.update(&key, &new);
+        *psv = new;
     }
-
     return 0;
 }
 
@@ -367,20 +366,11 @@ static __always_inline void ps_table_remove(flow_key fk){
     __u32 key = fk.src_ip;
     ps_value *value = portscan_table.lookup(&key);
     if(value){
-        value->index_counter -= 1;
+        value->ps_counter -= 1;
 
-        if(value->index_counter == 0){
+        if(value->ps_counter == 0){
             portscan_table.delete(&key);
             return;
-        }
-
-        bool found = false;
-        for(int i = 0; i < sizeof(value->scans)/sizeof(ps_index); i++){
-            if(value->scans[i].dst_ip == fk.dst_ip && value->scans[i].dst_port == fk.dst_port && value->scans[i].src_port == fk.src_port){
-                found = true;
-                if(found && i+1 < sizeof(value->scans)/sizeof(ps_index))
-                    value->scans[i] = value->scans[i+1] ;
-            }
         }
     }
 }
@@ -400,23 +390,15 @@ static __always_inline bool perf_output_capable(){
 
 static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_value fv, ps_value psv,int event_type){
 
-    event e = {psv.ps_type,fk.src_ip,fk.dst_ip,0};
+    // event_type = 0 flow classifed as a scan
+    // event_type = 1 portscan alert
+    // event_type = -1 remove stored flow
+    // event_type = -2 delete existing flows and restart
 
-    if(event_type == 1){
-        for(int i = 0; i < sizeof(psv.scans)/sizeof(ps_index); i++){
-            e.dst_port= psv.scans[i].dst_port;
-            e.timestamp = (bpf_ktime_get_ns() - psv.scans[i].timestamp);
-            if(perf_output_capable())
-                output.perf_submit(ctx, &e, sizeof(event));
-        }
-        return;
-    }
-
-    if(event_type == 2){
-        e.dst_port = fk.dst_port;
-    }
-    if(perf_output_capable())
+    if(perf_output_capable()){
+        event e = {event_type,psv.ps_type,fk.src_ip,fk.dst_ip,fk.dst_port,fk.src_port};
         output.perf_submit(ctx, &e, sizeof(event));
+    }
 
 }
 
@@ -437,12 +419,14 @@ int ebpf_main(struct xdp_md *ctx) {
     if(!fv.scan){
         ps_value psv = {};
         int event_type = ps_table_add(fk,fv,&psv);
-        if(event_type!=0)
-            event_output(ctx,fk,fv,psv,event_type);
+        event_output(ctx,fk,fv,psv,event_type);
     }
 
-    else if(fv.scan_counter*100/fv.packet_counter <= 5)
+    else if(fv.suspicious == 2){
         ps_table_remove(fk);
+        ps_value psv = {};
+        event_output(ctx,fk,fv,psv,-1);
+    }
 
     return XDP_PASS;
 }

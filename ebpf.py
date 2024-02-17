@@ -61,20 +61,25 @@ def get_input_argv():
     return ml_mode,listen_mode,flags
 
 def get_scan_options(check):
-    sa,sd = 25,600*10**9
+    sa,sd = 25,600*10**9 # default values
+
     if check == 2 or check == 3:
         if "--scan_attempts" == sys.argv[5]:
             try:
                 sa = int(sys.argv[6])
+                if sa <= 0:
+                    raise ValueError
             except (IndexError, ValueError) as e: 
-                print("EBPF-IDS: SCAN ATTEMPTS PARAMETER IS NOT AN INTEGER")
+                print("EBPF-IDS: SCAN ATTEMPTS PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
         elif "--scan_delay" == sys.argv[5]:
             try:
                 sd = int(sys.argv[6])*10**9
+                if sd <= 0:
+                    raise ValueError
             except (IndexError, ValueError) as e: 
-                print("EBPF-IDS: SCAN DELAY PARAMETER IS NOT AN INTEGER")
+                print("EBPF-IDS: SCAN DELAY PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
         else:
@@ -86,15 +91,19 @@ def get_scan_options(check):
         if "--scan_attempts" == sys.argv[7]:
             try:
                 sa = int(sys.argv[8])
+                if sa <= 0:
+                    raise ValueError
             except (IndexError, ValueError) as e: 
-                print("EBPF-IDS: SCAN ATTEMPTS PARAMETER IS NOT AN INTEGER")
+                print("EBPF-IDS: SCAN ATTEMPTS PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
         elif "--scan_delay" == sys.argv[7]:
             try:
                 sd = int(sys.argv[8])*10**9
+                if sd <= 0:
+                    raise ValueError
             except (IndexError, ValueError) as e: 
-                print("EBPF-IDS: SCAN DELAY PARAMETER IS NOT AN INTEGER")
+                print("EBPF-IDS: SCAN DELAY PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
         else:
@@ -170,12 +179,13 @@ def listen(b,mode):
                                                     "start": event["current_datetime"],
                                                     "last": event["current_datetime"]
                                                 },
-                                "scan_method":event["portscan_type"],
+                                "scan_method":event["portscan_method"],
                                 "alert_time":event["current_datetime"]
                             }
             }
         time.sleep(2) # give queue time to fill up
-        while True:
+        start_time = time.time()
+        while time.time()-start_time <= 2: # read queue for a max of 2 seconds 
             try:
                 item = q.get(timeout=0)
                 if item is None:
@@ -185,7 +195,7 @@ def listen(b,mode):
                                                 "start": item["current_datetime"],
                                                 "last": item["current_datetime"]
                                                 },
-                                "scan_method":item["portscan_type"],
+                                "scan_method":item["portscan_method"],
                                 "alert_time":item["current_datetime"]}
                     d[item["src_ip"]] = value
                 else:
@@ -221,28 +231,71 @@ def listen(b,mode):
 
         class Event(ctypes.Structure):
             _fields_ = [("type", ctypes.c_int),
+                ("ps_method", ctypes.c_int),
                 ("src_ip", ctypes.c_uint32),
                 ("dst_ip", ctypes.c_uint32),
                 ("dst_port", ctypes.c_uint16),
-                ("timestamp", ctypes.c_uint64)]
+                ("src_port", ctypes.c_uint16)]
 
         e = ctypes.cast(data,ctypes.POINTER(Event)).contents
 
         src_ip = socket.inet_ntoa(e.src_ip.to_bytes(4, byteorder='little'))
         dst_ip = socket.inet_ntoa(e.dst_ip.to_bytes(4, byteorder='little'))
-        current_datetime = datetime.fromtimestamp(time.time()-(e.timestamp/1e9))
+        current_datetime = datetime.fromtimestamp(time.time())
         dst_port = socket.ntohs(e.dst_port)
-        portscan_type = ["Vertical","Horizontal","Block"]
+        src_port = socket.ntohs(e.src_port)
+        portscan_method = ["Vertical","Horizontal","Block"]
 
-        if mode == 3:
-            print("{} - ALERT: {} Port Scan detected from {} to {}:{}".format(current_datetime,portscan_type[e.type],src_ip,dst_ip,dst_port))
-        elif mode == 4:
-            event = {"src_ip":src_ip,
-                    "dst_ip":dst_ip, 
-                    "current_datetime":current_datetime,
-                    "dst_port":dst_port, 
-                    "portscan_type":portscan_type[e.type]}
-            q.put(event)    
+        if e.type == -2: # restart count
+            del stored_notifications[src_ip][dst_ip]
+            stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port)]}
+
+        if e.type == -1: # remove element from stored notifications
+            for i in stored_notifications[src_ip][dst_ip]:
+                if i[0] == dst_port and i[2] == src_port:
+                    stored_notifications[src_ip][dst_ip].remove(i)
+                    break
+            if len(stored_notifications[src_ip][dst_ip]) == 0:
+                del stored_notifications[src_ip][dst_ip]
+                if len(stored_notifications[src_ip]) == 0:
+                    del stored_notifications[src_ip]
+
+        elif e.type == 0: # store a notification
+            if src_ip not in stored_notifications.keys():
+                stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port)]}
+            else:
+                if dst_ip not in stored_notifications[src_ip].keys():
+                    stored_notifications[src_ip][dst_ip] = [(dst_port,current_datetime,src_port)]
+                else:
+                    stored_notifications[src_ip][dst_ip] += [(dst_port,current_datetime,src_port)]
+
+        elif e.type == 1: # provide an alert
+            if mode == 3: # verbose
+                if src_ip in stored_notifications.keys():
+                    for k,v in stored_notifications[src_ip].items():
+                        for i in v:
+                            print("{} - ALERT: {} Port Scan detected from {}:{} to {}:{}".format(i[1],portscan_method[e.ps_method],src_ip,i[2],k,i[0]))
+                    del stored_notifications[src_ip]
+                # print all stored notifications and delete them as all subsequent notifactions are alerts
+                print("{} - ALERT: {} Port Scan detected from {}:{} to {}:{}".format(current_datetime,portscan_method[e.ps_method],src_ip,src_port,dst_ip,dst_port))
+            elif mode == 4: # simple
+                if src_ip in stored_notifications.keys():
+                    for k,v in stored_notifications[src_ip].items():
+                        for i in v:
+                            event = {"src_ip":src_ip,
+                                    "dst_ip":k, 
+                                    "current_datetime":i[1],
+                                    "dst_port":i[0], 
+                                    "portscan_method":portscan_method[e.ps_method]}
+                            q.put(event)
+                    del stored_notifications[src_ip]
+                # queue all stored notifications and delete them as all subsequent notifactions are alerts
+                event = {"src_ip":src_ip,
+                        "dst_ip":dst_ip, 
+                        "current_datetime":current_datetime,
+                        "dst_port":dst_port, 
+                        "portscan_method":portscan_method[e.ps_method]}
+                q.put(event)    
            
     def print_flowtable():
         print("\n\n" + "_"*123 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*123)
@@ -269,17 +322,13 @@ def listen(b,mode):
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
 
     def print_pstable():
-        print("\n\n"+ "_"*50)
-        print('{:<15s} | {:<6} | {:<15s}:{:<6}'.format("SRC IP", " PORT", "DST IP", "PORT"))
+        print("\n\n"+ "_"*52)
+        print('{:<15s} | {:<6} | {:<15s}:{:<6}'.format("SRC IP", "SCANS", "LAST DST IP", "LAST PORT"))
         for k,v in b["portscan_table"].items():
             src_ip = socket.inet_ntoa(k)
-            print('{:<15s} '.format(src_ip),end = '')
-            for i in range(v.index_counter):
-                dst_ip = socket.inet_ntoa(v.scans[i].dst_ip.to_bytes(4, byteorder='little'))
-                src_port = socket.ntohs(v.scans[i].src_port)
-                dst_port = socket.ntohs(v.scans[i].dst_port)
-                print('| {:<6} | {:<15s}:{:<6} \n{:<15s} '.format(src_port, dst_ip, dst_port," "),end='')
-            print("\r"+"_"*50)
+            dst_ip = socket.inet_ntoa(v.dst_ip.to_bytes(4, byteorder='little'))
+            dst_port = socket.ntohs(v.dst_port)
+            print('{:<15s} | {:<6} | {:<15s}:{:<6}'.format(src_ip, v.ps_counter, dst_ip, dst_port))
 
     def perf_output_error(value):
         q_lost.put(value)
@@ -293,7 +342,7 @@ def listen(b,mode):
             print_queued_error_data(value)
 
     def print_queued_error_data(value):
-        time.sleep(3) # give queue time to fill up
+        time.sleep(3) # give queue time to fill up and stored events to be printed
         total = value
         while True:
             try:
@@ -307,10 +356,11 @@ def listen(b,mode):
         time.sleep(2)
         print("EBPF-IDS: RESTARTING PERF OUTPUT\n")
         time.sleep(1)
-        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events cant be generated
+        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events can be generated
     
     if mode == 3 or mode == 4:
         b["output"].open_perf_buffer(print_event_data,lost_cb=perf_output_error)
+        stored_notifications = {}
         run = True
         q_lost = queue.Queue()
         lost_sample_thread = threading.Thread(target=queue_lost_data)
@@ -350,14 +400,14 @@ def main():
     if check != 0:
         input_values = get_input_argv()
         if input_values is None:
-            exit(1)
+            return
         ml_mode,listen_mode,flags = input_values
         scan_options = get_scan_options(check)
         if scan_options is None:
-            exit(1)
+            return
         sa,sd = scan_options
     else:
-        exit(1)
+        return
 
     print("EBPF-IDS: STARTED")
 
