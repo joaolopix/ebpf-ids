@@ -27,7 +27,7 @@ def usage():
     print("\t-K: Kernel mode showing bpf_trace_printk (for debugging ebpf)")
     print("OPTIONAL:")
     print("\t--scan_attempts: Number of scan attempts to infer a Port Scan (Default: 25)")
-    print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 600 sec)")
+    print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 1800 sec)")
     print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Lv\n")
 
 def check_input_argv():
@@ -61,7 +61,7 @@ def get_input_argv():
     return ml_mode,listen_mode,flags
 
 def get_scan_options(check):
-    sa,sd = 25,600*10**9 # default values
+    sa,sd = 25,1800*10**9 # default values
 
     if check == 2 or check == 3:
         if "--scan_attempts" == sys.argv[5]:

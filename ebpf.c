@@ -388,7 +388,7 @@ static __always_inline bool perf_output_capable(){
     return false;
 }
 
-static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, flow_value fv, ps_value psv,int event_type){
+static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, ps_value psv,int event_type){
 
     // event_type = 0 flow classifed as a scan
     // event_type = 1 portscan alert
@@ -419,13 +419,13 @@ int ebpf_main(struct xdp_md *ctx) {
     if(!fv.scan){
         ps_value psv = {};
         int event_type = ps_table_add(fk,fv,&psv);
-        event_output(ctx,fk,fv,psv,event_type);
+        event_output(ctx,fk,psv,event_type);
     }
 
     else if(fv.suspicious == 2){
         ps_table_remove(fk);
         ps_value psv = {};
-        event_output(ctx,fk,fv,psv,-1);
+        event_output(ctx,fk,psv,-1);
     }
 
     return XDP_PASS;
