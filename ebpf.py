@@ -177,7 +177,8 @@ def listen(b,mode):
     def print_queued_event_data(event):
         d = {event["src_ip"]:{  event["dst_ip"]:{   "ports": [event["dst_port"]],
                                                     "start": event["current_datetime"],
-                                                    "last": event["current_datetime"]
+                                                    "last": event["current_datetime"],
+                                                    "scan_type":[event["portscan_type"]]
                                                 },
                                 "scan_method":event["portscan_method"],
                                 "alert_time":event["current_datetime"]
@@ -193,7 +194,8 @@ def listen(b,mode):
                 if item["src_ip"] not in d.keys():
                     value = {item["dst_ip"]:{   "ports": [item["dst_port"]],
                                                 "start": item["current_datetime"],
-                                                "last": item["current_datetime"]
+                                                "last": item["current_datetime"],
+                                                "scan_type":[item["portscan_type"]]
                                                 },
                                 "scan_method":item["portscan_method"],
                                 "alert_time":item["current_datetime"]}
@@ -201,13 +203,16 @@ def listen(b,mode):
                 else:
                     if item["dst_ip"] not in d[item["src_ip"]].keys():
                         value = {   "ports": [item["dst_port"]],
-                                    "start": event["current_datetime"],
-                                    "last": event["current_datetime"]
+                                    "start": item["current_datetime"],
+                                    "last": item["current_datetime"],
+                                    "scan_type":[item["portscan_type"]]
                                 }
                         d[item["src_ip"]][item["dst_ip"]] = value               
                     else:                     
                         d[item["src_ip"]][item["dst_ip"]]["ports"]+=[item["dst_port"]]
                         d[item["src_ip"]][item["dst_ip"]]["last"]= item["current_datetime"]
+                        if item["portscan_type"] not in d[item["src_ip"]][item["dst_ip"]]["scan_type"]:
+                            d[item["src_ip"]][item["dst_ip"]]["scan_type"]+=[item["portscan_type"]]
 
             except queue.Empty:
                 for k,v in d.items():
@@ -216,6 +221,7 @@ def listen(b,mode):
                     for j,i in v.items():
                         if j not in ["scan_method", "alert_time"]:
                             print("{:<34s} | |___Target IP: {}".format(" ",j))
+                            print("{:<34s} | | |___ Scan Type: {}".format(" ",i["scan_type"]))
                             port_count = len(i["ports"])
                             ports = [min(i["ports"]),max(i["ports"])]
                             if port_count == 1 or ports[0] == ports[1]:
@@ -232,6 +238,7 @@ def listen(b,mode):
         class Event(ctypes.Structure):
             _fields_ = [("type", ctypes.c_int),
                 ("ps_method", ctypes.c_int),
+                ("ps_type", ctypes.c_int),
                 ("src_ip", ctypes.c_uint32),
                 ("dst_ip", ctypes.c_uint32),
                 ("dst_port", ctypes.c_uint16),
@@ -245,10 +252,11 @@ def listen(b,mode):
         dst_port = socket.ntohs(e.dst_port)
         src_port = socket.ntohs(e.src_port)
         portscan_method = ["Vertical","Horizontal","Block"]
+        portscan_type = ["","Udp","Fin","Syn","Ack"]
 
         if e.type == -2: # restart count
             del stored_notifications[src_ip][dst_ip]
-            stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port)]}
+            stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port,e.ps_type)]}
 
         if e.type == -1: # remove element from stored notifications
             for i in stored_notifications[src_ip][dst_ip]:
@@ -262,22 +270,22 @@ def listen(b,mode):
 
         elif e.type == 0: # store a notification
             if src_ip not in stored_notifications.keys():
-                stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port)]}
+                stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port,e.ps_type)]}
             else:
                 if dst_ip not in stored_notifications[src_ip].keys():
-                    stored_notifications[src_ip][dst_ip] = [(dst_port,current_datetime,src_port)]
+                    stored_notifications[src_ip][dst_ip] = [(dst_port,current_datetime,src_port,e.ps_type)]
                 else:
-                    stored_notifications[src_ip][dst_ip] += [(dst_port,current_datetime,src_port)]
+                    stored_notifications[src_ip][dst_ip] += [(dst_port,current_datetime,src_port,e.ps_type)]
 
         elif e.type == 1: # provide an alert
             if mode == 3: # verbose
                 if src_ip in stored_notifications.keys():
                     for k,v in stored_notifications[src_ip].items():
                         for i in v:
-                            print("{} - ALERT: {} Port Scan detected from {}:{} to {}:{}".format(i[1],portscan_method[e.ps_method],src_ip,i[2],k,i[0]))
+                            print("{} - ALERT: {} {} Port Scan detected from {}:{} to {}:{}".format(i[1],portscan_method[e.ps_method],portscan_type[i[3]],src_ip,i[2],k,i[0]))
                     del stored_notifications[src_ip]
                 # print all stored notifications and delete them as all subsequent notifactions are alerts
-                print("{} - ALERT: {} Port Scan detected from {}:{} to {}:{}".format(current_datetime,portscan_method[e.ps_method],src_ip,src_port,dst_ip,dst_port))
+                print("{} - ALERT: {} {} Port Scan detected from {}:{} to {}:{}".format(current_datetime,portscan_method[e.ps_method],portscan_type[e.ps_type],src_ip,src_port,dst_ip,dst_port))
             elif mode == 4: # simple
                 if src_ip in stored_notifications.keys():
                     for k,v in stored_notifications[src_ip].items():
@@ -286,7 +294,8 @@ def listen(b,mode):
                                     "dst_ip":k, 
                                     "current_datetime":i[1],
                                     "dst_port":i[0], 
-                                    "portscan_method":portscan_method[e.ps_method]}
+                                    "portscan_method":portscan_method[e.ps_method],
+                                    "portscan_type":portscan_type[i[3]]}
                             q.put(event)
                     del stored_notifications[src_ip]
                 # queue all stored notifications and delete them as all subsequent notifactions are alerts
@@ -294,12 +303,13 @@ def listen(b,mode):
                         "dst_ip":dst_ip, 
                         "current_datetime":current_datetime,
                         "dst_port":dst_port, 
-                        "portscan_method":portscan_method[e.ps_method]}
+                        "portscan_method":portscan_method[e.ps_method],
+                        "portscan_type":portscan_type[e.ps_type]}
                 q.put(event)    
            
     def print_flowtable():
-        print("\n\n" + "_"*123 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*123)
-        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} '
+        print("\n\n" + "_"*126 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*126)
+        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} '
                 .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","FLAGS","SCAN","SCAN PROBABILITY"))
         for k,v in b["flow_table"].items(): 
 
@@ -315,10 +325,11 @@ def listen(b,mode):
                     fl += f[i]
                 else:
                     fl += '.'
-            scan_to_str = ['yes','no']
+            #scan_to_str = ['yes','no']
+            scan_to_str = ['normal','udp','fin','syn','ack']
             scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
             
-            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<4} | {:<3} %'
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} %'
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
 
     def print_pstable():

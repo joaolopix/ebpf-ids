@@ -1,8 +1,8 @@
 
 static inline int predict_C(__u64 duration,__u16 protocol,__u64 packet_counter, __u64 transmited_bytes, int current_flags) {
 	int features[5] = {duration*10,protocol*10,packet_counter*10,transmited_bytes*10,current_flags*10};
-	int votes[2] = {0,0};
-          if (features[3] < 630) {
+	int votes[5] = {0};
+          if (features[3] < 635) {
               if (features[0] < 5000) {
                   if (features[1] < 115) {
                       votes[0] += 1;
@@ -28,7 +28,7 @@
               }
           }
         
-          if (features[3] < 630) {
+          if (features[3] < 635) {
               if (features[0] < 5000) {
                   if (features[3] < 515) {
                       votes[0] += 1;
@@ -52,7 +52,7 @@
         
           if (features[4] < 1111660) {
               if (features[2] < 15) {
-                  if (features[3] < 630) {
+                  if (features[3] < 665) {
                       votes[0] += 1;
                   } else {
                       votes[1] += 1;
@@ -98,7 +98,7 @@
               }
           }
         
-          if (features[3] < 630) {
+          if (features[3] < 635) {
               if (features[1] < 115) {
                   if (features[4] < 1111660) {
                       votes[0] += 1;
@@ -125,7 +125,7 @@
           }
         
           if (features[4] < 1111660) {
-              if (features[3] < 665) {
+              if (features[3] < 675) {
                   if (features[1] < 115) {
                       votes[0] += 1;
                   } else {
@@ -162,7 +162,7 @@
               }
           } else {
               if (features[1] < 115) {
-                  if (features[0] < 5000) {
+                  if (features[0] < 115000) {
                       votes[1] += 1;
                   } else {
                       votes[1] += 1;

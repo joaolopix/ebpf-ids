@@ -7,7 +7,7 @@ def extract_and_copy(source_file_path, dest_file_path, start_pattern_trees, end_
     content = "\n"
     content += "\rstatic inline int predict_C(__u64 duration,__u16 protocol,__u64 packet_counter, __u64 transmited_bytes, int current_flags) {" \
                "\n\tint features[5] = {duration*10,protocol*10,packet_counter*10,transmited_bytes*10,current_flags*10};" \
-               "\n\tint votes[2] = {0,0};\n\r"
+               "\n\tint votes[5] = {0};\n\r"
 
     found_trees_section = False
     first_tree = True
@@ -25,6 +25,9 @@ def extract_and_copy(source_file_path, dest_file_path, start_pattern_trees, end_
             line = line.replace('.', '')  # Remove periods
             line = line.replace('return 0;',"votes[0] += 1;")
             line = line.replace('return 1;',"votes[1] += 1;")
+            line = line.replace('return 2;', "votes[2] += 1;")
+            line = line.replace('return 3;', "votes[3] += 1;")
+            line = line.replace('return 4;', "votes[4] += 1;")
             content += line
 
     content = content.rsplit('}', 1)[0]

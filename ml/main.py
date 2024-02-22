@@ -147,8 +147,7 @@ def dataset_statistics(file_name,file2 = None):
     sample_syn = data[(data['label'] == 'attacker') & (data['Packets'] == 2)]
     print(sample_syn['attackDescription'].value_counts())
 
-
-def dataset_processing(save=False):
+def dataset_processing(multiclass=False):
 
     # Read the CSV file
     df1 = pd.read_csv("week1.csv", delimiter=",",low_memory=False)
@@ -171,77 +170,138 @@ def dataset_processing(save=False):
     data = data[~((data['Proto'] == 6) & (data['attackDescription'] != 2) & (data['attackDescription'] != 3) & (data['attackDescription'] != 4) & (data['label'] == 'attacker'))]
     data = data[~(((data['Proto'] == 17) & (data['attackDescription'] != 1) & (data['label'] == 'attacker')))]
 
-    # Undersample
-    class_counts = data['label'].value_counts()
-    minority_class = class_counts.idxmin()
-    majority_class = class_counts.idxmax()
-    majority_data = data[data['label'] == majority_class]
-    minority_data = data[data['label'] == minority_class]
-    # Undersample the majority class
-    undersampled_majority = resample(majority_data, replace=False, n_samples=len(minority_data), random_state=42)
-    # Concatenate the undersampled majority class with the minority class
-    undersampled_df = pd.concat([undersampled_majority, minority_data])
-    # Shuffle the dataframe to ensure randomness
-    undersampled_df = undersampled_df.sample(frac=1, random_state=42).reset_index(drop=True)
-    data = undersampled_df
+    if multiclass:
+        print(data['attackDescription'].value_counts())
+        # Oversample
+        sU = data[data['attackDescription'] == 1]
+        sS = data[data['attackDescription']==3]
+        sA = data[data['attackDescription'] == 4]
+        osU = sU[:int(len(sU)/4)]
+        osA = pd.concat([sA, sA[:int(len(sA)/2)]])
+        data = pd.concat([data, osU, sS,osA])
+        print(data['attackDescription'].value_counts())
+        # Undersample
+        majority_data = data[data['attackDescription'] == 0]
+        minority_data = data[data['attackDescription'] != 0]
+        class_counts = data['attackDescription'].value_counts()
+        minority_class = class_counts.idxmin()
+        minority_sub_data = data[data['attackDescription'] == minority_class]
+        undersampled_majority = resample(majority_data, replace=False, n_samples=len(minority_sub_data), random_state=42)
+        undersampled_df = pd.concat([undersampled_majority, minority_data])
+        # Shuffle the dataframe to ensure randomness
+        undersampled_df = undersampled_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        data = undersampled_df
+        print(data['attackDescription'].value_counts())
 
-    # Get Target data
-    Y = data['label']
+        # Get Target data
+        Z = data['attackDescription']
 
-    # Get X data
-    X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Dst Pt','Src Pt','attackType','attackID','attackDescription','Flows','Tos'], axis=1)
+        Z.to_csv('Z_data.csv', index=False)
 
-    X['Bytes'] = X['Bytes'].apply(convert_bytes).astype('Int64')
-    X['Flags'] = X['Flags'].apply(convert_flags).astype('Int64')
-    #X['Dst Pt'] = X['Dst Pt'].astype('Int64')
-    #X['Src Pt'] = X['Src Pt'].astype('Int64')
-    X['Duration'] = X['Duration'] * 1e6
-    X['Duration'] = X['Duration'].round().astype('Int64')
-    X['Packets'] = X['Packets'].astype('Int64')
+        # Get K data
+        K = data.drop(
+            ['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr', 'Dst Pt', 'Src Pt', 'attackType', 'attackID',
+             'attackDescription', 'Flows', 'Tos'], axis=1)
 
-    print(X.head())
+        K['Bytes'] = K['Bytes'].apply(convert_bytes).astype('Int64')
+        K['Flags'] = K['Flags'].apply(convert_flags).astype('Int64')
+        # X['Dst Pt'] = X['Dst Pt'].astype('Int64')
+        # X['Src Pt'] = X['Src Pt'].astype('Int64')
+        K['Duration'] = K['Duration'] * 1e6
+        K['Duration'] = K['Duration'].round().astype('Int64')
+        K['Packets'] = K['Packets'].astype('Int64')
 
-    print("\nData processing completed\n")
+        print(K.head())
 
-    if save:
-        X.to_csv('X_data.csv', index=False)
+        print("\nData processing completed\n")
+
+        K.to_csv('K_data.csv', index=False)
+
+    else:
+        # Undersample
+        class_counts = data['label'].value_counts()
+        minority_class = class_counts.idxmin()
+        majority_class = class_counts.idxmax()
+        majority_data = data[data['label'] == majority_class]
+        minority_data = data[data['label'] == minority_class]
+        # Undersample the majority class
+        undersampled_majority = resample(majority_data, replace=False, n_samples=len(minority_data), random_state=42)
+        # Concatenate the undersampled majority class with the minority class
+        undersampled_df = pd.concat([undersampled_majority, minority_data])
+        # Shuffle the dataframe to ensure randomness
+        undersampled_df = undersampled_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        data = undersampled_df
+
+        # Get Target data
+        Y = data['label']
+
         Y.to_csv('Y_data.csv', index=False)
 
-    return X,Y
+        # Get X data
+        X = data.drop(['label', 'Date first seen', 'Src IP Addr', 'Dst IP Addr','Dst Pt','Src Pt','attackType','attackID','attackDescription','Flows','Tos'], axis=1)
 
-def train_model(X,Y,n_trees,max_depth):
+        X['Bytes'] = X['Bytes'].apply(convert_bytes).astype('Int64')
+        X['Flags'] = X['Flags'].apply(convert_flags).astype('Int64')
+        #X['Dst Pt'] = X['Dst Pt'].astype('Int64')
+        #X['Src Pt'] = X['Src Pt'].astype('Int64')
+        X['Duration'] = X['Duration'] * 1e6
+        X['Duration'] = X['Duration'].round().astype('Int64')
+        X['Packets'] = X['Packets'].astype('Int64')
+
+        print(X.head())
+
+        print("\nData processing completed\n")
+
+        X.to_csv('X_data.csv', index=False)
+
+def train_model(X,Y,n_trees,max_depth,rs,multiclass=False):
 
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
 
     rf_Model = RandomForestClassifier()
-    rf_Model.set_params(n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True,random_state=1122)
+    if multiclass:
+        class_weights = {0: 1, 1: 1, 2: 2,3: 2,4: 3}
+        rf_Model.set_params(class_weight=class_weights,n_estimators=n_trees,max_depth=max_depth,max_leaf_nodes=1000,oob_score=True,random_state=rs) # 1122 binary ; 123456789 multi
+    else:
+        rf_Model.set_params(n_estimators=n_trees, max_depth=max_depth, max_leaf_nodes=1000,oob_score=True, random_state=rs)  # 1122 binary ; 123456789 multi
+
     rf_Model.fit(X_train, Y_train)
 
     Y_predicted = rf_Model.predict(X_test)
-    #Evaluate performance metrics
-    label_encoder = LabelEncoder()
-    Y_test_binary = label_encoder.fit_transform(Y_test)
-    Y_predicted_binary = label_encoder.transform(Y_predicted)
-    accuracy = accuracy_score(Y_test_binary,  Y_predicted_binary)
-    precision = precision_score(Y_test_binary,  Y_predicted_binary)
-    recall = recall_score(Y_test_binary,  Y_predicted_binary)
-    f1 = f1_score(Y_test_binary,  Y_predicted_binary)
-    precision_curve, recall_curve, _ = precision_recall_curve(Y_test_binary, Y_predicted_binary)
-    area_under_curve = auc(recall_curve, precision_curve)
-    oob_score = rf_Model.oob_score_
+
+    # Evaluate performance metrics
+    if multiclass:
+        accuracy= accuracy_score(Y_test, Y_predicted)
+        precision = precision_score(Y_test, Y_predicted, average='macro')
+        recall = recall_score(Y_test, Y_predicted, average='macro')
+        f1 = f1_score(Y_test, Y_predicted, average='macro')
+        oob_score = rf_Model.oob_score_
+    else:
+        label_encoder = LabelEncoder()
+        Y_test_binary = label_encoder.fit_transform(Y_test)
+        Y_predicted_binary = label_encoder.transform(Y_predicted)
+        accuracy = accuracy_score(Y_test_binary,  Y_predicted_binary)
+        precision = precision_score(Y_test_binary,  Y_predicted_binary)
+        recall = recall_score(Y_test_binary,  Y_predicted_binary)
+        f1 = f1_score(Y_test_binary,  Y_predicted_binary)
+        precision_curve, recall_curve, _ = precision_recall_curve(Y_test_binary, Y_predicted_binary)
+        area_under_curve = auc(recall_curve, precision_curve)
+        oob_score = rf_Model.oob_score_
 
     # Displaying the results
     print(f"Accuracy: {accuracy:.3f}")
     print(f"Precision: {precision:.3f}")
     print(f"Recall: {recall:.3f}")
     print(f"F1 Score: {f1:.3f}")
-    print(f"Area Under Precision-Recall Curve: {area_under_curve:.3f}")
+    #print(f"Area Under Precision-Recall Curve: {area_under_curve:.3f}")
     print(f"OOB Score: {oob_score:.3f}")
 
     cm = confusion_matrix(Y_test,Y_predicted,labels=rf_Model.classes_)
     cm_norm = cm/cm.sum(axis=1)[:,np.newaxis]
-    class_labels = rf_Model.classes_
-
+    if multiclass:
+        class_labels = ["normal","sU","sF","sS","sA"]
+    else:
+        class_labels = rf_Model.classes_
     plt.figure(figsize=(10, 7))
     sn.heatmap(cm_norm, annot=True, fmt='.2f', xticklabels=class_labels, yticklabels=class_labels)
     plt.xlabel('Predicted')
@@ -268,7 +328,7 @@ def model_to_C(rf_Model,file_name):
     cmodel = emlearn.convert(rf_Model)
     cmodel.save(file=file_name, name='rf')
 
-def evaluate_ntrees(X, Y, min_trees, max_trees, step_size):
+def evaluate_ntrees(X, Y, min_trees, max_trees, step_size,multiclass = False):
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 
     n_trees_range = range(min_trees, max_trees + 1, step_size)
@@ -281,15 +341,22 @@ def evaluate_ntrees(X, Y, min_trees, max_trees, step_size):
         Y_predicted = rf_Model.predict(X_test)
 
         # Evaluate performance metrics
-        label_encoder = LabelEncoder()
-        Y_test_binary = label_encoder.fit_transform(Y_test)
-        Y_predicted_binary = label_encoder.transform(Y_predicted)
+        if multiclass:
+            accuracy_scores.append(accuracy_score(Y_test, Y_predicted))
+            precision_scores.append(precision_score(Y_test, Y_predicted, average='macro'))
+            recall_scores.append(recall_score(Y_test, Y_predicted, average='macro'))
+            f1_scores.append(f1_score(Y_test, Y_predicted, average='macro'))
+            oob_scores.append(rf_Model.oob_score_)
+        else:
+            label_encoder = LabelEncoder()
+            Y_test_binary = label_encoder.fit_transform(Y_test)
+            Y_predicted_binary = label_encoder.transform(Y_predicted)
+            accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
+            precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
+            recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
+            f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
+            oob_scores.append(rf_Model.oob_score_)
 
-        accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
-        precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
-        recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
-        f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
-        oob_scores.append(rf_Model.oob_score_)
 
     # Plot the results
     plt.figure(figsize=(10, 6))
@@ -308,7 +375,7 @@ def evaluate_ntrees(X, Y, min_trees, max_trees, step_size):
     plt.legend()
     plt.show()
 
-def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees):
+def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees,multiclass = False):
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 
     d_range = range(min_d, max_d + 1, step_size)
@@ -321,15 +388,22 @@ def evaluate_depth(X, Y, min_d, max_d, step_size,n_trees):
         Y_predicted = rf_Model.predict(X_test)
 
         # Evaluate performance metrics
-        label_encoder = LabelEncoder()
-        Y_test_binary = label_encoder.fit_transform(Y_test)
-        Y_predicted_binary = label_encoder.transform(Y_predicted)
+        if multiclass:
+            accuracy_scores.append(accuracy_score(Y_test, Y_predicted))
+            precision_scores.append(precision_score(Y_test, Y_predicted, average='macro'))
+            recall_scores.append(recall_score(Y_test, Y_predicted, average='macro'))
+            f1_scores.append(f1_score(Y_test, Y_predicted, average='macro'))
+            oob_scores.append(rf_Model.oob_score_)
+        else:
+            label_encoder = LabelEncoder()
+            Y_test_binary = label_encoder.fit_transform(Y_test)
+            Y_predicted_binary = label_encoder.transform(Y_predicted)
 
-        accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
-        precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
-        recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
-        f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
-        oob_scores.append(rf_Model.oob_score_)
+            accuracy_scores.append(accuracy_score(Y_test_binary, Y_predicted_binary))
+            precision_scores.append(precision_score(Y_test_binary, Y_predicted_binary))
+            recall_scores.append(recall_score(Y_test_binary, Y_predicted_binary))
+            f1_scores.append(f1_score(Y_test_binary, Y_predicted_binary))
+            oob_scores.append(rf_Model.oob_score_)
 
     # Plot the results
     plt.figure(figsize=(10, 6))
@@ -353,15 +427,60 @@ def evaluate_balance(file_path):
     with open(file_path, 'r') as src:
         lines = src.readlines()
 
-    votes = [0,0]
+    votes = [0,0,0,0,0]
 
     for line in lines:
-        if "votes[1] += 1" in line:
-            votes[1] += 1
-        if "votes[0] += 1" in line:
+        if "return 0;" in line:
             votes[0] += 1
-
+        if "return 1;" in line:
+            votes[1] += 1
+        if "return 2;" in line:
+            votes[2] += 1
+        if "return 3;" in line:
+            votes[3] += 1
+        if "return 4;" in line:
+            votes[4] += 1
     print(votes)
+
+def main_b():
+
+    #dataset_processing(multiclass=False)
+
+    X = pd.read_csv("X_data.csv", delimiter=",")
+    Y = pd.read_csv("Y_data.csv").values.ravel()  # label
+
+    #evaluate_ntrees(X, Y, min_trees=5, max_trees=100, step_size=5,multiclass=True)
+    #evaluate_depth(X, Y, min_d=1, max_d=50, step_size=5,n_trees=11,multiclass=True)
+
+    n_trees = 11
+    max_depth = 3
+    rf_Model = train_model(X, Y, n_trees, max_depth, 1122,multiclass=False)
+
+    model_to_C(rf_Model,'binary_model/rf_b.h')
+    rf_gen_C.generate_C_code('binary_model/rf_b.h', 'binary_model/rf_model_b.h', n_trees)
+    rf_gen_PY.generate_PY_code('binary_model/rf_b.h', 'binary_model/rf_model_b.py', max_depth)
+
+    evaluate_balance('binary_model/rf_b.h')
+
+def main_m():
+
+    #dataset_processing(multiclass=True)
+
+    K = pd.read_csv("K_data.csv", delimiter=",")
+    Z = pd.read_csv("Z_data.csv").values.ravel()  # attack_d
+
+    #evaluate_ntrees(K, Z, min_trees=5, max_trees=100, step_size=5,multiclass=True)
+    #evaluate_depth(K, Z, min_d=1, max_d=50, step_size=5,n_trees=11,multiclass=True)
+
+    n_trees = 11
+    max_depth = 3
+    rf_Model = train_model(K, Z, n_trees, max_depth, 123456789,multiclass=True)
+
+    model_to_C(rf_Model, 'multiclass_model/rf_m.h')
+    rf_gen_C.generate_C_code('multiclass_model/rf_m.h', 'multiclass_model/rf_model_m.h', n_trees)
+    rf_gen_PY.generate_PY_code('multiclass_model/rf_m.h', 'multiclass_model/rf_model_m.py', max_depth)
+
+    evaluate_balance('multiclass_model/rf_m.h')
 
 def main():
 
@@ -369,24 +488,8 @@ def main():
     #dataset_statistics("week2.csv")
     #dataset_statistics("week1.csv","week2.csv")
 
-
-    #X,Y = dataset_processing(save=True)
-    X = pd.read_csv("X_data.csv", delimiter=",")
-    Y = pd.read_csv("Y_data.csv").values.ravel()
-
-    #evaluate_ntrees(X, Y, min_trees=5, max_trees=100, step_size=5)
-    #evaluate_depth(X, Y, min_d=1, max_d=50, step_size=5,n_trees=11)
-
-    n_trees = 11
-    max_depth = 3
-    emlearn_file = 'rf.h'
-    rf_Model = train_model(X,Y,n_trees,max_depth)
-
-    model_to_C(rf_Model,emlearn_file)
-    rf_gen_C.generate_C_code(emlearn_file,'rf_model.h',n_trees)
-    rf_gen_PY.generate_PY_code(emlearn_file,'rf_model.py',max_depth)
-
-    #evaluate_balance('rf_model.h')
+    #main_b()
+    main_m()
 
 
 if __name__ == "__main__":

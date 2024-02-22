@@ -24,7 +24,7 @@ typedef struct flow_value {
     __u64 transmited_bytes;
     __u64 flags[6];
     // end of features
-    __u64 scan; // 0 scan, 1 normal
+    __u64 scan; // 0 normal, [1-4] scan
     __u64 scan_counter; // counts how many times has it been classified as a scan
     __u64 suspicious; // 0 normal ; 1 change from scan to normal; 2 no longer suspicous , used to trigger deletion of portscan_table
 }flow_value;
@@ -50,6 +50,7 @@ typedef struct tree_node {
 typedef struct event {
     int type;
     int ps_method;
+    int ps_type;
     __u32 src_ip;
     __u32 dst_ip;
     __u16 dst_port;
@@ -61,11 +62,12 @@ typedef struct ps_value {
     __u16 dst_port; // used to calculate ps_type
     __u64 timestamp; // used to compare to PS_DELAY
     int ps_counter;
-    int ps_type; // 0 vertical, 1 horizontal, 2 block
+    int ps_method; // 0 vertical, 1 horizontal, 2 block
+    int ps_type; // type of scan, syn, ack, etc
 } ps_value;
 
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 500);
-BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 100);
+BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 50);
 
 BPF_TABLE("array", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("array", int, int, tree_roots, N_TREES);
@@ -180,7 +182,7 @@ static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_e
 static __always_inline int predict_MAP(__u64 duration,__u16 protocol,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
 
     int features[5] = {duration*10,protocol*10,packet_counter*10,transmited_bytes*10,current_flags*10};
-    int votes [2] = {0,0}; // the size should be the same as the number of classes
+    int votes [5] = {0}; // the size should be the same as the number of classes
 
     int j = 0;
     for (int i = 0; i < N_TREES; i++) {
@@ -257,10 +259,10 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         else
             value->scan = predict_C(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
 
-        if(prev_pred == 0 && value->scan != prev_pred) // flow was classifed as a scan previously and it changed to normal
+        if(prev_pred != 0 && value->scan != prev_pred) // flow was classifed as a scan previously and it changed to normal
             value->suspicious = 1;
 
-        if(!value->scan)
+        if(value->scan != 0)
             value->scan_counter += 1;
 
         if(value->suspicious == 2)
@@ -297,7 +299,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         else
             new.scan = predict_C(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
         
-        if(!new.scan)
+        if(new.scan != 0)
             new.scan_counter += 1;
 
         *fv = new;
@@ -324,7 +326,8 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             value->dst_port = fk.dst_port;
             value->timestamp = fv.timestamp;
             value->ps_counter = 1;
-            value->ps_type = 0;
+            value->ps_method = 0;
+            value->ps_type = fv.scan;
             *psv = *value;
             return -2;
         }
@@ -334,16 +337,16 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             value->ps_counter += 1;
             
             if(value->dst_ip != fk.dst_ip)
-                value->ps_type = 1; // horizontal
-            if(value->ps_type == 1 && value->dst_port != fk.dst_port)
-                value->ps_type = 2; //block
+                value->ps_method = 1; // horizontal
+            if(value->ps_method == 1 && value->dst_port != fk.dst_port)
+                value->ps_method = 2; //block
 
             value->dst_ip = fk.dst_ip;
             value->dst_port = fk.dst_port;
             value->timestamp = fv.timestamp; 
-
+            value->ps_type = fv.scan;
+            *psv = *value;
             if(value->ps_counter >= PS_THRESHOLD){
-                *psv = *value;
                 return 1;
             }
         }
@@ -354,7 +357,8 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
         new.dst_port = fk.dst_port;
         new.timestamp = fv.timestamp;
         new.ps_counter = 1;
-        new.ps_type = 0;
+        new.ps_method = 0;
+        new.ps_type = fv.scan;
         portscan_table.update(&key, &new);
         *psv = new;
     }
@@ -396,7 +400,7 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, ps_val
     // event_type = -2 delete existing flows and restart
 
     if(perf_output_capable()){
-        event e = {event_type,psv.ps_type,fk.src_ip,fk.dst_ip,fk.dst_port,fk.src_port};
+        event e = {event_type,psv.ps_method,psv.ps_type,fk.src_ip,fk.dst_ip,fk.dst_port,fk.src_port};
         output.perf_submit(ctx, &e, sizeof(event));
     }
 
@@ -416,7 +420,7 @@ int ebpf_main(struct xdp_md *ctx) {
 
     flow_table_add(&pkt,&fk,&fv);
 
-    if(!fv.scan){
+    if(fv.scan != 0){
         ps_value psv = {};
         int event_type = ps_table_add(fk,fv,&psv);
         event_output(ctx,fk,psv,event_type);

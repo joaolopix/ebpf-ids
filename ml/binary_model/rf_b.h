@@ -5,7 +5,7 @@
     
 
 EmlTreesNode rf_nodes[66] = {
-  { 3, 63.0, 1, 2 },
+  { 3, 63.5, 1, 2 },
   { 0, 500.0, 6, 5 },
   { 3, 112.5, 3, 4 },
   { 4, 116166.0, 5, 5 },
@@ -13,7 +13,7 @@ EmlTreesNode rf_nodes[66] = {
   { -1, 1, -1, -1 },
   { 1, 11.5, 7, 7 },
   { -1, 0, -1, -1 },
-  { 3, 63.0, 9, 10 },
+  { 3, 63.5, 9, 10 },
   { 0, 500.0, 12, 5 },
   { 4, 116166.0, 11, 5 },
   { 3, 112.5, 5, 5 },
@@ -21,7 +21,7 @@ EmlTreesNode rf_nodes[66] = {
   { 4, 111166.0, 14, 15 },
   { 2, 1.5, 16, 5 },
   { 2, 1.5, 17, 18 },
-  { 3, 63.0, 7, 5 },
+  { 3, 66.5, 7, 5 },
   { 4, 121111.5, 5, 5 },
   { 2, 2.5, 5, 5 },
   { 3, 63.5, 20, 21 },
@@ -29,14 +29,14 @@ EmlTreesNode rf_nodes[66] = {
   { 4, 116166.0, 23, 5 },
   { 4, 111166.0, 7, 7 },
   { 1, 11.5, 5, 5 },
-  { 3, 63.0, 25, 26 },
+  { 3, 63.5, 25, 26 },
   { 1, 11.5, 27, 28 },
   { 4, 116166.0, 29, 5 },
   { 4, 111166.0, 7, 7 },
   { 3, 55.5, 7, 7 },
   { 4, 111216.0, 5, 7 },
   { 4, 111166.0, 31, 32 },
-  { 3, 66.5, 33, 34 },
+  { 3, 67.5, 33, 34 },
   { 4, 121111.5, 35, 5 },
   { 1, 11.5, 7, 7 },
   { 3, 106.5, 5, 5 },
@@ -44,7 +44,7 @@ EmlTreesNode rf_nodes[66] = {
   { 3, 63.5, 37, 38 },
   { 0, 500.0, 41, 5 },
   { 1, 11.5, 39, 40 },
-  { 0, 500.0, 5, 5 },
+  { 0, 11500.0, 5, 5 },
   { 2, 1.5, 5, 5 },
   { 3, 51.5, 7, 7 },
   { 0, 500.0, 43, 44 },
@@ -83,7 +83,7 @@ EmlTrees rf = {
     };
 
 static inline int32_t rf_predict_tree_0(const float *features, int32_t features_length) {
-          if (features[3] < 63.0) {
+          if (features[3] < 63.5) {
               if (features[0] < 500.0) {
                   if (features[1] < 11.5) {
                       return 0;
@@ -112,7 +112,7 @@ static inline int32_t rf_predict_tree_0(const float *features, int32_t features_
         
 
 static inline int32_t rf_predict_tree_1(const float *features, int32_t features_length) {
-          if (features[3] < 63.0) {
+          if (features[3] < 63.5) {
               if (features[0] < 500.0) {
                   if (features[3] < 51.5) {
                       return 0;
@@ -139,7 +139,7 @@ static inline int32_t rf_predict_tree_1(const float *features, int32_t features_
 static inline int32_t rf_predict_tree_2(const float *features, int32_t features_length) {
           if (features[4] < 111166.0) {
               if (features[2] < 1.5) {
-                  if (features[3] < 63.0) {
+                  if (features[3] < 66.5) {
                       return 0;
                   } else {
                       return 1;
@@ -191,7 +191,7 @@ static inline int32_t rf_predict_tree_3(const float *features, int32_t features_
         
 
 static inline int32_t rf_predict_tree_4(const float *features, int32_t features_length) {
-          if (features[3] < 63.0) {
+          if (features[3] < 63.5) {
               if (features[1] < 11.5) {
                   if (features[4] < 111166.0) {
                       return 0;
@@ -221,7 +221,7 @@ static inline int32_t rf_predict_tree_4(const float *features, int32_t features_
 
 static inline int32_t rf_predict_tree_5(const float *features, int32_t features_length) {
           if (features[4] < 111166.0) {
-              if (features[3] < 66.5) {
+              if (features[3] < 67.5) {
                   if (features[1] < 11.5) {
                       return 0;
                   } else {
@@ -261,7 +261,7 @@ static inline int32_t rf_predict_tree_6(const float *features, int32_t features_
               }
           } else {
               if (features[1] < 11.5) {
-                  if (features[0] < 500.0) {
+                  if (features[0] < 11500.0) {
                       return 1;
                   } else {
                       return 1;
