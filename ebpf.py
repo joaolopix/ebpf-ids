@@ -259,14 +259,15 @@ def listen(b,mode):
             stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port,e.ps_type)]}
 
         if e.type == -1: # remove element from stored notifications
-            for i in stored_notifications[src_ip][dst_ip]:
-                if i[0] == dst_port and i[2] == src_port:
-                    stored_notifications[src_ip][dst_ip].remove(i)
-                    break
-            if len(stored_notifications[src_ip][dst_ip]) == 0:
-                del stored_notifications[src_ip][dst_ip]
-                if len(stored_notifications[src_ip]) == 0:
-                    del stored_notifications[src_ip]
+            if src_ip in stored_notifications.keys():
+                for i in stored_notifications[src_ip][dst_ip]:
+                    if i[0] == dst_port and i[2] == src_port:
+                        stored_notifications[src_ip][dst_ip].remove(i)
+                        break
+                if len(stored_notifications[src_ip][dst_ip]) == 0:
+                    del stored_notifications[src_ip][dst_ip]
+                    if len(stored_notifications[src_ip]) == 0:
+                        del stored_notifications[src_ip]
 
         elif e.type == 0: # store a notification
             if src_ip not in stored_notifications.keys():

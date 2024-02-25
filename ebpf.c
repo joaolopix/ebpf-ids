@@ -332,10 +332,7 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             return -2;
         }
         else{
-            value->timestamp = fv.timestamp;
 
-            value->ps_counter += 1;
-            
             if(value->dst_ip != fk.dst_ip)
                 value->ps_method = 1; // horizontal
             if(value->ps_method == 1 && value->dst_port != fk.dst_port)
@@ -343,7 +340,8 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
 
             value->dst_ip = fk.dst_ip;
             value->dst_port = fk.dst_port;
-            value->timestamp = fv.timestamp; 
+            value->timestamp = fv.timestamp;
+            value->ps_counter += 1;
             value->ps_type = fv.scan;
             *psv = *value;
             if(value->ps_counter >= PS_THRESHOLD){
@@ -361,6 +359,9 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
         new.ps_type = fv.scan;
         portscan_table.update(&key, &new);
         *psv = new;
+        if(new.ps_counter >= PS_THRESHOLD){
+            return 1;
+        }
     }
     return 0;
 }
