@@ -219,6 +219,7 @@ def portscan_table_add(fk,fv):
         
         if fv.timestamp - value.timestamp > PS_DELAY:
             value = Portscan_Value(fk[1],fk[3],1,fv.timestamp,fv.scan,0)
+            return -2,value
         else:
             value.timestamp = fv.timestamp
             value.counter += 1
@@ -232,13 +233,17 @@ def portscan_table_add(fk,fv):
             value.ps_type = fv.scan
 
             if value.counter >= PS_THRESHOLD:
-                return value
+                return 1,value
             else:
-                return None
+                return 0,value
 
     else:
         ps_value = Portscan_Value(fk[1],fk[3],1,fv.timestamp,fv.scan,0)
         portscan_table.put(key,ps_value) 
+        if ps_value.counter >= PS_THRESHOLD:
+            return 1,ps_value
+        else:
+            return 0,ps_value
 
 def portscan_table_remove(key):
 
@@ -247,11 +252,7 @@ def portscan_table_remove(key):
     if value.counter == 0:
         portscan_table.remove(key)
 
-def event(src_ip,ps):
-    portscan_method = ["Vertical","Horizontal","Block"]
-    portscan_type = ["","Udp","Fin","Syn","Ack"]
-    print("{} - ALERT: {} {} Port Scan detected from {} to {}:{}"
-          .format(datetime.fromtimestamp(time.time()),portscan_method[ps.ps_method],portscan_type[ps.ps_type],src_ip,ps.dst_ip,ps.dst_port))
+    return -1,value
 
 def packet_parser(pkt):
     if IP in pkt and hasattr(pkt[IP], 'payload'):
@@ -274,12 +275,12 @@ def packet_handler(pkt):
     if packet is not None:
         fk,fv = flow_table_add(packet)
         if fv.scan != 0:
-            portscan = portscan_table_add(fk,fv)
-            if portscan is not None:
-                q.put((fk[0],portscan))
+            e,portscan = portscan_table_add(fk,fv)
+            q.put((e,fk,portscan))
 
         elif fv.suspicious == 2:
-            portscan_table_remove(fk[0])
+            e,portscan = portscan_table_remove(fk[0])
+            q.put((e,fk,portscan))
 
 def print_flows():
     print("\n\n" + "_"*126 + "\nTable size: "+ str(flow_table.len()) + "\n" + "_"*126)
@@ -303,37 +304,83 @@ def print_flows():
 
 def logs():
     global run
+    stored_notifications = {}
     while run:
         value = q.get()
         if value is None:
             break
-        src_ip,ps = value
-        event(src_ip,ps)
+        e,fk,ps_value = value
+        portscan_method = ["Vertical","Horizontal","Block"]
+        portscan_type = ["","Udp","Fin","Syn","Ack"]
+        src_ip = fk[0]
+        dst_ip = fk[1]
+        dst_port = fk[3]
+        src_port = fk[2]
+        current_datetime = datetime.fromtimestamp(time.time())
+
+        if e == -2: # restart count
+            del stored_notifications[src_ip][dst_ip]
+            stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port,ps_value.ps_type)]}
+
+        if e == -1: # remove element from stored notifications
+            if src_ip in stored_notifications.keys():
+                for i in stored_notifications[src_ip][dst_ip]:
+                    if i[0] == dst_port and i[2] == src_port:
+                        stored_notifications[src_ip][dst_ip].remove(i)
+                        break
+                if len(stored_notifications[src_ip][dst_ip]) == 0:
+                    del stored_notifications[src_ip][dst_ip]
+                    if len(stored_notifications[src_ip]) == 0:
+                        del stored_notifications[src_ip]
+
+        elif e == 0: # store a notification
+            if src_ip not in stored_notifications.keys():
+                stored_notifications[src_ip] = {dst_ip: [(dst_port,current_datetime,src_port,ps_value.ps_type)]}
+            else:
+                if dst_ip not in stored_notifications[src_ip].keys():
+                    stored_notifications[src_ip][dst_ip] = [(dst_port,current_datetime,src_port,ps_value.ps_type)]
+                else:
+                    stored_notifications[src_ip][dst_ip] += [(dst_port,current_datetime,src_port,ps_value.ps_type)]
+
+        elif e== 1: # provide an alert
+            if src_ip in stored_notifications.keys():
+                for k,v in stored_notifications[src_ip].items():
+                    for i in v:
+                        print("{} - ALERT: {} {} Port Scan detected from {}:{} to {}:{}".format(i[1],portscan_method[ps_value.ps_method],portscan_type[i[3]],src_ip,i[2],k,i[0]))
+                del stored_notifications[src_ip]
+            # print all stored notifications and delete them as all subsequent notifactions are alerts
+            print("{} - ALERT: {} {} Port Scan detected from {}:{} to {}:{}".format(current_datetime,portscan_method[ps_value.ps_method],portscan_type[ps_value.ps_type],src_ip,src_port,dst_ip,dst_port))
+        
         #print_flows()
 
 def main():
+    print("U-IDS: STARTED")
 
     def sigint_handler(signum, frame):
         global run,p,t
         run = False
         q.put(None)
         t = time.time()-t
+        print("\nU-IDS: CTRL^C CALLED")
+        print("U-IDS: WAITING FOR LOG THREAD JOIN")
         log_thread.join()
-        print("\nPacket capture stopped by user (Ctrl+C)")
-        print("processed packets: %d \n"
-              "elapsed time %d" % (p,t))
-        print("packets per second: %d" % (int(p/t)))
+        print("U-IDS: PACKET CAPTURE STOPPED")
+        print("U-IDS: STATISTICS")
+        print("\tprocessed packets: %d \n"
+              "\telapsed time %d" % (p,t))
+        print("\tpackets per second: %d" % (int(p/t)))
 
         exit(0)
 
     # Register the SIGINT handler
     signal.signal(signal.SIGINT, sigint_handler)
 
+    print("U-IDS: LOGS THREAD STARTED")
     log_thread = threading.Thread(target=logs)
     log_thread.start()
 
+    print("U-IDS: SNIFFING TRAFFIC\n")
     sniff(iface=INTERFACE_NAME, filter="ip dst " + INTERFACE_IP,prn=packet_handler,store=0)
-
 
 if __name__ == "__main__":
     main()
