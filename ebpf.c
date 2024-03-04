@@ -6,7 +6,6 @@
 #include <linux/udp.h>
 #include <linux/types.h>
 #include <linux/if_packet.h>
-#include <linux/ipv6.h>
 #include "rf_model.h"
 
 typedef struct flow_key {
@@ -254,6 +253,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         }
 
         __u64 prev_pred = value->scan;
+
         if(MODEL_MODE) // MODEL_MODE 1 = via ebpf Maps
             value->scan = predict_MAP(value->duration,key.protocol,value->packet_counter,value->transmited_bytes,current_flags);
         else
@@ -270,7 +270,6 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         if(value->scan_counter*100/value->packet_counter <= 5 && value->suspicious == 1) // no longer suspicious
             value->suspicious = 2; // trigger deletion event from portscan_table
         
-
         *fv = *value;
     } 
     else {
@@ -298,7 +297,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
             new.scan = predict_MAP(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
         else
             new.scan = predict_C(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
-        
+
         if(new.scan != 0)
             new.scan_counter += 1;
 
@@ -331,23 +330,22 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             *psv = *value;
             return -2;
         }
-        else{
+  
+        if(value->dst_ip != fk.dst_ip)
+            value->ps_method = 1; // horizontal
+        if(value->ps_method == 1 && value->dst_port != fk.dst_port)
+            value->ps_method = 2; //block
 
-            if(value->dst_ip != fk.dst_ip)
-                value->ps_method = 1; // horizontal
-            if(value->ps_method == 1 && value->dst_port != fk.dst_port)
-                value->ps_method = 2; //block
-
-            value->dst_ip = fk.dst_ip;
-            value->dst_port = fk.dst_port;
-            value->timestamp = fv.timestamp;
-            value->ps_counter += 1;
-            value->ps_type = fv.scan;
-            *psv = *value;
-            if(value->ps_counter >= PS_THRESHOLD){
-                return 1;
-            }
+        value->dst_ip = fk.dst_ip;
+        value->dst_port = fk.dst_port;
+        value->timestamp = fv.timestamp;
+        value->ps_counter += 1;
+        value->ps_type = fv.scan;
+        *psv = *value;
+        if(value->ps_counter >= PS_THRESHOLD){
+            return 1;
         }
+
     }
     else{
         ps_value new = {};
@@ -372,11 +370,8 @@ static __always_inline void ps_table_remove(flow_key fk){
     ps_value *value = portscan_table.lookup(&key);
     if(value){
         value->ps_counter -= 1;
-
-        if(value->ps_counter == 0){
+        if(value->ps_counter == 0)
             portscan_table.delete(&key);
-            return;
-        }
     }
 }
 
@@ -408,6 +403,7 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, ps_val
 }
 
 int ebpf_main(struct xdp_md *ctx) {
+
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
 
@@ -425,9 +421,11 @@ int ebpf_main(struct xdp_md *ctx) {
         ps_value psv = {};
         int event_type = ps_table_add(fk,fv,&psv);
         event_output(ctx,fk,psv,event_type);
+        if(event_type == 1 && DETECTION_MODE)
+            return XDP_DROP;
     }
 
-    else if(fv.suspicious == 2){
+    if(fv.suspicious == 2){
         ps_table_remove(fk);
         ps_value psv = {};
         event_output(ctx,fk,psv,-1);

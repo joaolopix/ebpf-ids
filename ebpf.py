@@ -11,7 +11,7 @@ import queue
 import threading
 
 def usage():
-    print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [OUTPUT MODE] [OPTIONAL PARAMETERS]")
+    print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [DETECTION RESPONSE] [OUTPUT MODE] [OPTIONAL PARAMETERS]")
     print("\nXDP MODE:")
     print("\t-S: use skb / generic mode")
     print("\t-D: use driver / native mode")
@@ -19,6 +19,9 @@ def usage():
     print("ML MODEL MODE:")
     print("\t-C: C compiled model mode")
     print("\t-M: MAPs stored model mode")
+    print("DETECTION RESPONSE:")
+    print("\t-P: Passive mode")
+    print("\t-A: Active mode")
     print("OUTPUT MODE:")
     print("\t-Lv: Logs from Perf Output (Verbose)")
     print("\t-Ls: Logs from Perf Output (Simple)")
@@ -31,11 +34,11 @@ def usage():
     print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Lv\n")
 
 def check_input_argv():
-    if len(sys.argv) == 5:
+    if len(sys.argv) == 6:
         return 1
-    elif len(sys.argv) == 7:
+    elif len(sys.argv) == 8:
         return 2
-    elif len(sys.argv) == 9:
+    elif len(sys.argv) == 10:
         return 3
     usage()
     return 0
@@ -57,25 +60,38 @@ def get_input_argv():
         print("EBPF-IDS: INVALID XDP MODE")
         usage()
         return None
+    detection_mode = get_detection_mode()
+    if detection_mode == -1:
+        print("EBPF-IDS: INVALID DETECTION MODE")
+        usage()
+        return None
     
-    return ml_mode,listen_mode,flags
+    return ml_mode,listen_mode,flags,detection_mode
+
+def get_detection_mode():
+    d = -1
+    if "-P" == sys.argv[4]:
+        return 0
+    if "-A" == sys.argv[4]:
+        return 1
+    return d
 
 def get_scan_options(check):
     sa,sd = 25,1800*10**9 # default values
 
     if check == 2 or check == 3:
-        if "--scan_attempts" == sys.argv[5]:
+        if "--scan_attempts" == sys.argv[6]:
             try:
-                sa = int(sys.argv[6])
+                sa = int(sys.argv[7])
                 if sa <= 0:
                     raise ValueError
             except (IndexError, ValueError) as e: 
                 print("EBPF-IDS: SCAN ATTEMPTS PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
-        elif "--scan_delay" == sys.argv[5]:
+        elif "--scan_delay" == sys.argv[6]:
             try:
-                sd = int(sys.argv[6])*10**9
+                sd = int(sys.argv[7])*10**9
                 if sd <= 0:
                     raise ValueError
             except (IndexError, ValueError) as e: 
@@ -88,18 +104,18 @@ def get_scan_options(check):
             return None
             
     if check == 3:
-        if "--scan_attempts" == sys.argv[7]:
+        if "--scan_attempts" == sys.argv[8]:
             try:
-                sa = int(sys.argv[8])
+                sa = int(sys.argv[9])
                 if sa <= 0:
                     raise ValueError
             except (IndexError, ValueError) as e: 
                 print("EBPF-IDS: SCAN ATTEMPTS PARAMETER MUST BE A POSITIVE INTEGER")
                 usage()
                 return None
-        elif "--scan_delay" == sys.argv[7]:
+        elif "--scan_delay" == sys.argv[8]:
             try:
-                sd = int(sys.argv[8])*10**9
+                sd = int(sys.argv[9])*10**9
                 if sd <= 0:
                     raise ValueError
             except (IndexError, ValueError) as e: 
@@ -128,15 +144,15 @@ def get_ml_model_mode():
 
 def get_listen_mode():
     mode = -1
-    if "-K" == sys.argv[4]:
+    if "-K" == sys.argv[5]:
         return 0
-    if "-Uf" == sys.argv[4]:
+    if "-Uf" == sys.argv[5]:
         return 1
-    if "-Up" == sys.argv[4]:
+    if "-Up" == sys.argv[5]:
         return 2
-    if "-Lv" == sys.argv[4]:
+    if "-Lv" == sys.argv[5]:
         return 3
-    if "-Ls" == sys.argv[4]:
+    if "-Ls" == sys.argv[5]:
         return 4
     return mode
 
@@ -313,7 +329,6 @@ def listen(b,mode):
         print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} '
                 .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","FLAGS","SCAN","SCAN PROBABILITY"))
         for k,v in b["flow_table"].items(): 
-
             src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
             dst_ip = socket.inet_ntoa(k.dst_ip.to_bytes(4, byteorder='little'))
             src_port = socket.ntohs(k.src_port)
@@ -329,7 +344,6 @@ def listen(b,mode):
             #scan_to_str = ['yes','no']
             scan_to_str = ['normal','udp','fin','syn','ack']
             scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
-            
             print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} %'
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
 
@@ -413,7 +427,7 @@ def main():
         input_values = get_input_argv()
         if input_values is None:
             return
-        ml_mode,listen_mode,flags = input_values
+        ml_mode,listen_mode,flags,detection_mode = input_values
         scan_options = get_scan_options(check)
         if scan_options is None:
             return
@@ -434,7 +448,8 @@ def main():
 
     b = BPF(text=ebpf_str, device=offloaded_device,cflags=[f"-DN_TREES={n_trees}",f"-DN_NODES={n_nodes}",
                                                            f"-DMAX_TREE_DEPTH={mtd}",f"-DMODEL_MODE={ml_mode}",
-                                                           f"-DPS_THRESHOLD={sa}",f"-DPS_DELAY={sd}"])
+                                                           f"-DPS_THRESHOLD={sa}",f"-DPS_DELAY={sd}",
+                                                           f"-DDETECTION_MODE={detection_mode}"])
     fn = b.load_func("ebpf_main", mode, device=offloaded_device)
     print("EBPF-IDS: CODE LOADED")
 
