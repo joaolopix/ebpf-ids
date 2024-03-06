@@ -65,13 +65,18 @@ typedef struct ps_value {
     int ps_type; // type of scan, syn, ack, etc
 } ps_value;
 
+typedef struct ring_buffer {
+    int flag;
+    int lost;
+} ring_buffer;
+
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 500);
 BPF_TABLE("lru_hash", __u32, ps_value, portscan_table, 50);
 
 BPF_TABLE("array", int, tree_node, tree_nodes, N_NODES);
 BPF_TABLE("array", int, int, tree_roots, N_TREES);
 
-BPF_TABLE("array", int, int, event_flag, 1);
+BPF_TABLE("array", int, ring_buffer, event_table, 1);
 BPF_PERF_OUTPUT(output);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
@@ -378,12 +383,12 @@ static __always_inline void ps_table_remove(flow_key fk){
 static __always_inline bool perf_output_capable(){
 
     int key = 0;
-    int *value = event_flag.lookup(&key);
+    ring_buffer *value = event_table.lookup(&key);
     if(value){
-        if(*value == 1)
+        if(value->flag == 1)
             return true;
         else
-            return false;
+            value->lost += 1;
     }
     return false;
 }

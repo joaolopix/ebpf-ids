@@ -183,6 +183,8 @@ def set_model_map(b):
 
 def listen(b,mode):
 
+    ## alerts
+
     def queue_event_data():
         while run:
             event = q.get()
@@ -323,7 +325,9 @@ def listen(b,mode):
                         "portscan_method":portscan_method[e.ps_method],
                         "portscan_type":portscan_type[e.ps_type]}
                 q.put(event)    
-           
+
+    ## tables
+
     def print_flowtable():
         print("\n\n" + "_"*126 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*126)
         print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} '
@@ -356,9 +360,15 @@ def listen(b,mode):
             dst_port = socket.ntohs(v.dst_port)
             print('{:<15s} | {:<6} | {:<15s}:{:<6}'.format(src_ip, v.ps_counter, dst_ip, dst_port))
 
+    ## ring buffer
+            
+    class Ring_Buffer(ctypes.Structure):
+        _fields_ = [("flag", ctypes.c_int),
+                    ("lost", ctypes.c_int)]
+
     def perf_output_error(value):
         q_lost.put(value)
-        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(0) # events cant be generated
+        b["event_table"][ctypes.c_int(0)] = Ring_Buffer(0,0) # events cant be generated
     
     def queue_lost_data():
         while run:
@@ -377,12 +387,14 @@ def listen(b,mode):
                     break
                 total += value
             except queue.Empty:
-                print("\nEBPF-IDS: ERROR - PERF OUTPUT AS REACHED MAXIMUM CAPACITY, %d POSSIBILITY LOST SAMPLES, STOPPED EVENTS SUBMISSION" % (total))
+                print("\nEBPF-IDS: ERROR - PERF OUTPUT AS REACHED MAXIMUM CAPACITY, %d POSSIBILITY LOST SAMPLES, STOPPED EVENT SUBMISSION" % (total))
                 break
         time.sleep(2)
-        print("EBPF-IDS: RESTARTING PERF OUTPUT\n")
+        rb = b["event_table"][ctypes.c_int(0)]
+        print("EBPF-IDS: LOST %d EVENTS" % (rb.lost))
+        print("EBPF-IDS: RESTARTING PERF OUTPUT SUBMISSION\n")
         time.sleep(1)
-        b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events can be generated
+        b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
     
     if mode == 3 or mode == 4:
         b["output"].open_perf_buffer(print_event_data,lost_cb=perf_output_error)
@@ -457,7 +469,10 @@ def main():
         set_model_map(b)
         print("EBPF-IDS: ML MODEL LOADED")
 
-    b["event_flag"][ctypes.c_int(0)] = ctypes.c_int(1) # events can be generated
+    class Ring_Buffer(ctypes.Structure):
+        _fields_ = [("flag", ctypes.c_int),
+                    ("lost", ctypes.c_int)]
+    b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
 
     b.attach_xdp(device, fn, flags)
     print("EBPF-IDS: ATTACHED\n")
