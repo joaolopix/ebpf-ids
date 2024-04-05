@@ -54,6 +54,8 @@ typedef struct event {
     __u32 dst_ip;
     __u16 dst_port;
     __u16 src_port;
+    __u16 protocol;
+    __u16 padding;
 } event;
 
 typedef struct ps_value {
@@ -92,7 +94,115 @@ BPF_PERF_OUTPUT(output);
 BPF_TABLE("array", int, tail_ctx, tail_table, 1);
 BPF_PROG_ARRAY(tail, 1);
 
+static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
+
+    struct udphdr *udp_header = data + *offset;
+    *offset += sizeof(struct udphdr);
+    if (data + *offset > data_end)
+        return false;
+    pkt->port16[0] = udp_header->source;
+    pkt->port16[1] = udp_header->dest;
+
+    return true;
+}
+
+static __always_inline bool parse_tcp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
+
+    struct tcphdr *tcp_header = data + *offset;
+    *offset += sizeof(struct tcphdr);
+    if (data + *offset > data_end)
+        return false;
+
+    pkt->port16[0] = tcp_header->source;
+    pkt->port16[1] = tcp_header->dest;
+    pkt->flags[0] = tcp_header->urg;
+    pkt->flags[1] = tcp_header->ack;
+    pkt->flags[2] = tcp_header->psh;
+    pkt->flags[3] = tcp_header->rst;
+    pkt->flags[4] = tcp_header->syn;
+    pkt->flags[5] = tcp_header->fin;
+
+	return true;
+}
+
+static __always_inline bool parse_ipv4(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
+
+    struct iphdr *ipv4_header = data + *offset;
+    *offset += sizeof(struct iphdr);
+    if (data + *offset > data_end)
+        return false;
+
+    pkt->src = ipv4_header->saddr;
+    pkt->dst = ipv4_header->daddr;
+    pkt->l4_proto = ipv4_header->protocol;
+
+	return true;
+}
+
+static __always_inline bool parse_ethernet_header(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+    struct ethhdr *ethernet_header = data;
+    *offset = sizeof(struct ethhdr);
+    if (data + *offset > data_end) 
+        return false;
+
+    int ethernet_protocol = ethernet_header->h_proto;
+    pkt->l3_proto = bpf_htons(ethernet_protocol);
+
+    return true;
+}
+
+static __always_inline bool parse_ip_header(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+
+    if(pkt->l3_proto == ETH_P_IP){
+        if(!parse_ipv4(pkt,data,data_end,offset))
+            return false;
+    }
+    else
+        return false; // for ipv6
+
+    return true;
+}
+
+static __always_inline bool parse_l4data(pkt_data *pkt,void *data, void *data_end, __u64 *offset){
+
+    if(pkt->l4_proto == IPPROTO_TCP){
+        if(!parse_tcp(pkt,data,data_end,offset))
+            return false;
+    }
+    else if(pkt->l4_proto == IPPROTO_UDP){
+        if(!parse_udp(pkt,data,data_end,offset))
+            return false;
+    }
+    else
+        return false; // neither TCP or UDP
+
+    return true;
+}
+
+static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_end){
+
+    __u64 offset;
+
+    if(!parse_ethernet_header(pkt,data,data_end,&offset))
+            return false;
+    
+    if(!parse_ip_header(pkt,data,data_end,&offset))
+            return false;
+    
+    if(!parse_l4data(pkt,data,data_end,&offset))
+            return false;
+
+    pkt->pkt_len = data_end - data;
+    pkt->data_len = data_end - data - offset;
+    
+    return true;
+}
+
 static __always_inline int parse_meta_data(struct xdp_md *ctx,pkt_data *pkt,void *data, void *data_end, __u64* rf_pred){
+
+    if(ctx->rx_queue_index==0)
+        return false;
+
      meta_data *md;
     __u64 offset = sizeof(meta_data);
     if (data + offset > data_end)
@@ -107,7 +217,6 @@ static __always_inline int parse_meta_data(struct xdp_md *ctx,pkt_data *pkt,void
     
     if (bpf_xdp_adjust_head(ctx, (int)sizeof(meta_data)))
 		return false;
-
     return true;
 
 }
@@ -155,6 +264,30 @@ static __always_inline int predict_MAP(__u64 duration,__u16 protocol,__u64 packe
         }
     }
     return most_voted_class;
+}
+
+static __always_inline int predict_sub_hierachy(flow_key key,int current_flags,int rf_pred){
+    if(rf_pred == 0){
+        return 0; // normal;
+    }
+    else{
+        if(key.protocol == IPPROTO_UDP){
+            return 1; // udp scan
+        }
+        else if (key.protocol == IPPROTO_TCP){
+            if (current_flags == 121111){
+                return 2;
+            }
+            else if (current_flags == 111121){
+                return 3;
+            }
+            else if (current_flags == 121112){
+                return 4;
+            }
+        }
+        return 5;
+    }
+
 }
 
 static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_value *fv, __u64 rf_pred){
@@ -212,7 +345,24 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
         new.duration = 0;
         new.scan_counter = 0;
         new.suspicious = 0;
-        new.scan = rf_pred;
+        int current_flags = 0;
+        for(int i = 0; i < sizeof(new.flags)/sizeof(__u64); i++){
+            if(pkt->flags[i]==1)
+                new.flags[i] = 2;
+            else
+                new.flags[i] = 1;
+            current_flags = current_flags + new.flags[i];
+            if(i!=sizeof(new.flags)/sizeof(__u64)-1)
+                current_flags = current_flags * 10;
+        }
+        if(OFFLOAD_MODE)
+            new.scan = predict_sub_hierachy(key,current_flags,rf_pred);
+        else{
+            if(MODEL_MODE) // MODEL_MODE 1 = via Maps
+                new.scan = predict_MAP(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
+            else
+                new.scan = predict_C(new.duration,key.protocol,new.packet_counter,new.transmited_bytes,current_flags);
+        }
 
         if(new.scan != 0)
             new.scan_counter += 1;
@@ -312,7 +462,7 @@ static __always_inline void event_output(struct xdp_md *ctx, flow_key fk, ps_val
     // event_type = -2 delete existing flows and restart
 
     if(perf_output_capable()){
-        event e = {event_type,psv.ps_method,psv.ps_type,fk.src_ip,fk.dst_ip,fk.dst_port,fk.src_port};
+        event e = {event_type,psv.ps_method,psv.ps_type,fk.src_ip,fk.dst_ip,fk.dst_port,fk.src_port,fk.protocol,0};
         output.perf_submit(ctx, &e, sizeof(event));
     }
 
@@ -338,6 +488,10 @@ int ebpf_main_tail(struct xdp_md *ctx){
             ps_table_remove(fk);
             event_output(ctx,fk,(ps_value){},-1);
         }
+
+        if(OFFLOAD_MODE && fv.packet_counter==2){
+            event_output(ctx,fk,(ps_value){},-3);
+        }
     }
 
     return XDP_PASS;
@@ -347,13 +501,13 @@ int ebpf_main(struct xdp_md *ctx) {
 
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
+
+    pkt_data pkt = {};
+    __u64 rf_pred = ctx->rx_queue_index;
     
-    pkt_data pkt;
-    __u64 rf_pred;
-
-    if(!parse_meta_data(ctx,&pkt,data,data_end,&rf_pred))
+    if(!packet_parser(&pkt,data,data_end))
         return XDP_PASS;
-
+ 
     flow_key fk = {};
     flow_value fv = {};
 

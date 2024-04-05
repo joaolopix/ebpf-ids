@@ -8,6 +8,15 @@
 #include <linux/if_packet.h>
 #include "ebpfids_rf.h"
 
+typedef struct flow_key {
+    __u32 src_ip;
+    __u32 dst_ip;
+    __u16 src_port;
+    __u16 dst_port;
+    __u16 protocol;
+    __u16 padding;
+}flow_key;
+
 typedef struct pkt_data {
     __be32 src;
     __be32 dst;
@@ -23,6 +32,9 @@ typedef struct meta_data{
     pkt_data pkt;
     int rf_pred;
 } meta_data;
+
+
+BPF_TABLE("hash", flow_key, int, flow_table, 500);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -128,20 +140,11 @@ static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_e
     return true;
 }
 
-int ebpf_main(struct xdp_md *ctx) {
-
-    void *data = (void *)(long)ctx->data; 
-    void *data_end = (void *)(long)ctx->data_end;
-
-    pkt_data pkt = {};
-
-    if(!packet_parser(&pkt,data,data_end))
-        return XDP_PASS;
-    
+static __always_inline int calculate_flags(pkt_data *pkt){
     int current_flags = 0;
     __u64 flags[6];
     for(int i = 0; i < sizeof(flags)/sizeof(__u64); i++){
-            if(pkt.flags[i])
+            if(pkt->flags[i])
                 flags[i] = 2;
             else
                 flags[i] = 1;
@@ -149,23 +152,30 @@ int ebpf_main(struct xdp_md *ctx) {
             if(i!=sizeof(flags)/sizeof(__u64)-1)
                 current_flags = current_flags * 10;
         }
-    
-    int rf_pred = predict_C(0,pkt.l4_proto,1,pkt.pkt_len,current_flags);
+    return current_flags;
+}
 
-    if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(meta_data)))
-		return XDP_PASS;
 
-    data_end = (void*)(long)ctx->data_end;
-    data = (void*)(long)ctx->data;
+int ebpf_main(struct xdp_md *ctx) {
 
-    __u64 offset = sizeof(meta_data);
+    void *data = (void *)(long)ctx->data; 
+    void *data_end = (void *)(long)ctx->data_end;
+    ctx->rx_queue_index = 0;
+    pkt_data pkt = {};
 
-    if (data + offset > data_end)
+    if(!packet_parser(&pkt,data,data_end))
         return XDP_PASS;
+    
+    flow_key key = {pkt.src,pkt.dst,pkt.port16[0],pkt.port16[1],pkt.l4_proto,0};
+    int* value = flow_table.lookup(&key);
+    if(value)
+       return XDP_PASS;
 
-    meta_data *md = data;
-	md->pkt = pkt;
-    md->rf_pred = rf_pred;
+    int current_flags = calculate_flags(&pkt);
+    int rf_pred = predict_C(0,pkt.l4_proto,1,pkt.pkt_len,current_flags);
+    
+    if(rf_pred != 0)
+        ctx->rx_queue_index = 1;  
 
     return XDP_PASS;
 }

@@ -27,7 +27,8 @@ def usage():
     print("\t-Ls: Logs from Perf Output (Simple)")
     print("\t-Up: Userspace mode showing Port Scan Table")
     print("\t-Uf: Userspace mode showing Flows")
-    print("\t-K: Kernel mode showing bpf_trace_printk (for debugging ebpf)")
+    print("\t-K: Kernel mode showing bpf_trace_printk (for debugging ebpf code)")
+    print("\t\t incompatible with offload and may cause unknown behaviour with perf events")
     print("OPTIONAL:")
     print("\t--scan_attempts: Number of scan attempts to infer a Port Scan (Default: 25)")
     print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 1800 sec)")
@@ -181,7 +182,7 @@ def set_model_map(b):
         b["tree_roots"][ctypes.c_int(index)] = ctypes.c_int(root)
         index += 1
 
-def listen(b,mode):
+def listen(b,mode,o,offload):
 
     ## alerts
 
@@ -251,7 +252,7 @@ def listen(b,mode):
                             print("{:<34s} | | |___ Duration Time: {}".format(" ",i["last"]-i["start"]))
                 break
 
-    def print_event_data(cpu, data, size):
+    def handle_event_data(cpu, data, size):
 
         class Event(ctypes.Structure):
             _fields_ = [("type", ctypes.c_int),
@@ -260,7 +261,9 @@ def listen(b,mode):
                 ("src_ip", ctypes.c_uint32),
                 ("dst_ip", ctypes.c_uint32),
                 ("dst_port", ctypes.c_uint16),
-                ("src_port", ctypes.c_uint16)]
+                ("src_port", ctypes.c_uint16),
+                ("protocol", ctypes.c_uint16),
+                ("padding",ctypes.c_uint16)]
 
         e = ctypes.cast(data,ctypes.POINTER(Event)).contents
 
@@ -270,7 +273,21 @@ def listen(b,mode):
         dst_port = socket.ntohs(e.dst_port)
         src_port = socket.ntohs(e.src_port)
         portscan_method = ["Vertical","Horizontal","Block"]
-        portscan_type = ["","Udp","Fin","Syn","Ack"]
+        portscan_type = ["","Udp","Fin","Syn","Ack","Scan"]
+
+        if e.type == -3: # offload event
+            class FLow_key(ctypes.Structure):
+                _fields_ = [("src_ip", ctypes.c_uint32),
+                ("dst_ip", ctypes.c_uint32),
+                ("src_port", ctypes.c_uint16),
+                ("dst_port", ctypes.c_uint16),
+                ("protocol", ctypes.c_uint16),
+                ("padding",ctypes.c_uint16)]
+            fk = FLow_key(e.src_ip,e.dst_ip,e.src_port,e.dst_port,e.protocol,ctypes.c_uint16(0))
+            o["flow_table"][fk] = ctypes.c_int(1)
+
+        if mode != 3 and mode != 4: # dont provide any alerts only handle offload events
+            return
 
         if e.type == -2: # restart count
             del stored_notifications[src_ip][dst_ip]
@@ -328,6 +345,16 @@ def listen(b,mode):
 
     ## tables
 
+    def flow_table_call():
+        while run: 
+            print_flowtable()
+            time.sleep(2)
+
+    def port_table_call():
+        while run:
+            print_pstable()
+            time.sleep(2) 
+
     def print_flowtable():
         print("\n\n" + "_"*126 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*126)
         print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} '
@@ -346,7 +373,7 @@ def listen(b,mode):
                 else:
                     fl += '.'
             #scan_to_str = ['yes','no']
-            scan_to_str = ['normal','udp','fin','syn','ack']
+            scan_to_str = ['normal','udp','fin','syn','ack','scan']
             scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
             print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} %'
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
@@ -359,7 +386,7 @@ def listen(b,mode):
             dst_ip = socket.inet_ntoa(v.dst_ip.to_bytes(4, byteorder='little'))
             dst_port = socket.ntohs(v.dst_port)
             print('{:<15s} | {:<6} | {:<15s}:{:<6}'.format(src_ip, v.ps_counter, dst_ip, dst_port))
-
+    
     ## ring buffer
             
     class Ring_Buffer(ctypes.Structure):
@@ -396,52 +423,42 @@ def listen(b,mode):
         time.sleep(1)
         b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
     
-    if mode == 3 or mode == 4:
-        b["output"].open_perf_buffer(print_event_data,lost_cb=perf_output_error)
-        stored_notifications = {}
-        run = True
-        q_lost = queue.Queue()
-        lost_sample_thread = threading.Thread(target=queue_lost_data)
-        lost_sample_thread.start()
-        if mode == 4:
-            q = queue.Queue()
-            q_thread = threading.Thread(target=queue_event_data)
-            q_thread.start()   
+    b["output"].open_perf_buffer(handle_event_data,lost_cb=perf_output_error)
+    stored_notifications = {}
+    run = True
+    q_lost = queue.Queue()
+    lost_sample_thread = threading.Thread(target=queue_lost_data)
+    lost_sample_thread.start()
+
+    if mode == 1: # flows
+        wt = threading.Thread(target=flow_table_call)
+        wt.start()
+    elif mode == 2: # portscan table
+        wt = threading.Thread(target=port_table_call)
+        wt.start()
+    if mode == 4:
+        q = queue.Queue()
+        q_thread = threading.Thread(target=queue_event_data)
+        q_thread.start()
     
     try:
         while True:
-            if mode == 1:
-                time.sleep(2) 
-                print_flowtable()   
-            elif mode == 2:
-                time.sleep(2) 
-                print_pstable() 
-            elif mode == 3 or mode == 4:
+            if mode != 0:
                 b.perf_buffer_poll()
             else:
                 b.trace_print()
-
+            
     except KeyboardInterrupt:
-        if mode == 3 or mode == 4:
-            run = False
-            q_lost.put(None)
-            lost_sample_thread.join()
-            if mode == 4:
-                q.put(None)
-                q_thread.join()
+        run = False
+        q_lost.put(None)
+        lost_sample_thread.join()
+        if mode == 4:
+            q.put(None)
+            q_thread.join()
+        elif mode == 1 or mode == 2:
+            wt.join()
         return
 
-def adress_legacy_issues(content):
-    # in the presence of an older kernel hardcoded modifications are required to the code
-    lines = content.split('\n')
-    # Check if line 433 exists
-    if (len(lines) >= 433):
-        # Modify the line if it exists
-        if ("if(fv.suspicious == 2){" in lines[432]):
-            lines[432] = lines[432].replace("if(fv.suspicious == 2){", "else if(fv.suspicious == 2){")
-            # Join the modified lines back into a single string
-            modified_content = '\n'.join(lines)
-    return modified_content
 
 def main():
 
@@ -461,15 +478,14 @@ def main():
     print("EBPF-IDS: STARTED")
 
     device, offloaded_device = get_device_from_argv()
-
+    offload_mode = 0
+    o = None
     mode = BPF.XDP
-    if(offloaded_device is None):
-        ebpf_ker = read_ebpf_file('ebpfids_legacy.c')
-        if(detection_mode==0):ebpf_ker=adress_legacy_issues(ebpf_ker)
-    else:
-        ebpf_ker = read_ebpf_file('ebpfids_kernel.c')
-        ebpf_off = read_ebpf_file('ebpfids_hardware.c')
 
+    ebpf_ker = read_ebpf_file('ebpfids_kernel.c')
+    if(offloaded_device is not None):
+        ebpf_off = read_ebpf_file('ebpfids_hardware.c')
+        offload_mode = 1
         o = BPF(text=ebpf_off, device=offloaded_device)
         ofn = o.load_func("ebpf_main", mode, device=offloaded_device)
         print("EBPF-IDS: NFP CODE OFFLOADED")
@@ -487,15 +503,15 @@ def main():
     b = BPF(text=ebpf_ker, device=None,cflags=[f"-DN_TREES={n_trees}",f"-DN_NODES={n_nodes}",
                                                            f"-DMAX_TREE_DEPTH={mtd}",f"-DMODEL_MODE={ml_mode}",
                                                            f"-DPS_THRESHOLD={sa}",f"-DPS_DELAY={sd}",
-                                                           f"-DDETECTION_MODE={detection_mode}"])
+                                                           f"-DDETECTION_MODE={detection_mode}",
+                                                           f"-DOFFLOAD_MODE={offload_mode}"])
     fn = b.load_func("ebpf_main", mode, device=None)
     print("EBPF-IDS: MAIN CODE LOADED")
 
-    if(offloaded_device is not None):
-        tfn = b.load_func("ebpf_main_tail", mode, device=None)
-        prog_array = b.get_table("tail") 
-        prog_array[ctypes.c_int(0)] = ctypes.c_int(tfn.fd)
-        print("EBPF-IDS: TAIL CODE LOADED")
+    tfn = b.load_func("ebpf_main_tail", mode, device=None)
+    prog_array = b.get_table("tail") 
+    prog_array[ctypes.c_int(0)] = ctypes.c_int(tfn.fd)
+    print("EBPF-IDS: TAIL CODE LOADED")
     
     if(ml_mode):
         set_model_map(b)
@@ -505,11 +521,11 @@ def main():
         _fields_ = [("flag", ctypes.c_int),
                     ("lost", ctypes.c_int)]
     b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
-
+   
     b.attach_xdp(device, fn, flags)
     print("EBPF-IDS: XDP ATTACHED\n")
 
-    listen(b,listen_mode)
+    listen(b,listen_mode,o,offload_mode)
 
     print("\n\nEBPF-IDS: REMOVING FILTER FROM DEVICE")
     b.remove_xdp(device, flags)
