@@ -72,14 +72,10 @@ typedef struct ring_buffer {
     int lost;
 } ring_buffer;
 
-typedef struct meta_data{
-    pkt_data pkt;
-    int rf_pred;
-} meta_data;
-
 typedef struct tail_ctx{
     flow_key fk;
     flow_value fv;
+    __u64 rf_pred;
 } tail_ctx;
 
 BPF_TABLE("lru_hash", flow_key, flow_value, flow_table, 500);
@@ -198,29 +194,6 @@ static __always_inline bool packet_parser(pkt_data *pkt,void *data, void *data_e
     return true;
 }
 
-static __always_inline int parse_meta_data(struct xdp_md *ctx,pkt_data *pkt,void *data, void *data_end, __u64* rf_pred){
-
-    if(ctx->rx_queue_index==0)
-        return false;
-
-     meta_data *md;
-    __u64 offset = sizeof(meta_data);
-    if (data + offset > data_end)
-        return false;
-
-    md = data;
-    *pkt = md->pkt;
-    *rf_pred = md->rf_pred;
-
-    if(*rf_pred < 0 || *rf_pred > 4)
-        return false;
-    
-    if (bpf_xdp_adjust_head(ctx, (int)sizeof(meta_data)))
-		return false;
-    return true;
-
-}
-
 static __always_inline int predict_MAP(__u64 duration,__u16 protocol,__u64 packet_counter, __u64 transmited_bytes, int current_flags){
 
     int features[5] = {duration*10,protocol*10,packet_counter*10,transmited_bytes*10,current_flags*10};
@@ -275,13 +248,13 @@ static __always_inline int predict_sub_hierachy(flow_key key,int current_flags,i
             return 1; // udp scan
         }
         else if (key.protocol == IPPROTO_TCP){
-            if (current_flags == 121111){
+            if (current_flags == 121111){ // ack
                 return 2;
             }
-            else if (current_flags == 111121){
+            else if (current_flags == 111121){ // syn
                 return 3;
             }
-            else if (current_flags == 121112){
+            else if (current_flags == 121112){ // fin
                 return 4;
             }
         }
@@ -355,7 +328,7 @@ static __always_inline void flow_table_add(pkt_data *pkt, flow_key *fk, flow_val
             if(i!=sizeof(new.flags)/sizeof(__u64)-1)
                 current_flags = current_flags * 10;
         }
-        if(OFFLOAD_MODE)
+        if(OFFLOAD_MODE && rf_pred != 2)
             new.scan = predict_sub_hierachy(key,current_flags,rf_pred);
         else{
             if(MODEL_MODE) // MODEL_MODE 1 = via Maps
@@ -475,6 +448,7 @@ int ebpf_main_tail(struct xdp_md *ctx){
     if(value){
         flow_key fk = value->fk;
         flow_value fv = value->fv;
+        __u64 rf_pred = value->rf_pred;
 
         if(fv.scan != 0){
         ps_value psv = {};
@@ -489,7 +463,8 @@ int ebpf_main_tail(struct xdp_md *ctx){
             event_output(ctx,fk,(ps_value){},-1);
         }
 
-        if(OFFLOAD_MODE && fv.packet_counter==2){
+        if(OFFLOAD_MODE && (fv.packet_counter==2 || (fv.packet_counter>10 && rf_pred == 1))){
+            // if the flow is active send event, if after a while offloading is still sending market packets, resend event, maybe was lost
             event_output(ctx,fk,(ps_value){},-3);
         }
     }
@@ -514,7 +489,7 @@ int ebpf_main(struct xdp_md *ctx) {
     flow_table_add(&pkt,&fk,&fv,rf_pred);
 
     int key = 0;
-    tail_ctx new = {fk,fv};
+    tail_ctx new = {fk,fv,ctx->rx_queue_index};
     tail_table.update(&key, &new);
     tail.call(ctx,0);
 

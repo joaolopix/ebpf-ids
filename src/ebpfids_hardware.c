@@ -8,6 +8,8 @@
 #include <linux/if_packet.h>
 #include "ebpfids_rf.h"
 
+#define TABLE_SIZE 100
+
 typedef struct flow_key {
     __u32 src_ip;
     __u32 dst_ip;
@@ -28,13 +30,8 @@ typedef struct pkt_data {
     bool flags[6];
 }pkt_data;
 
-typedef struct meta_data{
-    pkt_data pkt;
-    int rf_pred;
-} meta_data;
-
-
-BPF_TABLE("hash", flow_key, int, flow_table, 500);
+BPF_TABLE("hash", flow_key, int, flow_table, TABLE_SIZE);
+BPF_TABLE("array", int, int, counter, 1);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -155,8 +152,20 @@ static __always_inline int calculate_flags(pkt_data *pkt){
     return current_flags;
 }
 
-
 int ebpf_main(struct xdp_md *ctx) {
+
+    // ctx->rx_queue_index = 0 indicates that either the packet was not processed or is begnin
+    // ctx->rx_queue_index = 1 the packet is a portscan
+    // ctx->rx_queue_index = 2 the flow table is full, and classifications from offload are not viable until restored
+
+    int counter_key = 0;
+    int* table_size = counter.lookup(&counter_key);
+    if(table_size){
+        if(*table_size == TABLE_SIZE){
+            ctx->rx_queue_index = 2;
+            return XDP_PASS;
+        }
+    }
 
     void *data = (void *)(long)ctx->data; 
     void *data_end = (void *)(long)ctx->data_end;
@@ -170,7 +179,7 @@ int ebpf_main(struct xdp_md *ctx) {
     int* value = flow_table.lookup(&key);
     if(value)
        return XDP_PASS;
-
+    
     int current_flags = calculate_flags(&pkt);
     int rf_pred = predict_C(0,pkt.l4_proto,1,pkt.pkt_len,current_flags);
     

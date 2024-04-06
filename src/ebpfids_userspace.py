@@ -10,6 +10,10 @@ import sys
 import queue
 import threading
 
+SCAN_ATTEMPTS = 25
+SCAN_DELAY = 1800*10**9
+OFFLOADED_MAP_SIZE = 100
+
 def usage():
     print(f"\nUsage: {sys.argv[0]} [XDP MODE] <ifdev> [ML MODEL MODE] [DETECTION RESPONSE] [OUTPUT MODE] [OPTIONAL PARAMETERS]")
     print("\nXDP MODE:")
@@ -28,7 +32,6 @@ def usage():
     print("\t-Up: Userspace mode showing Port Scan Table")
     print("\t-Uf: Userspace mode showing Flows")
     print("\t-K: Kernel mode showing bpf_trace_printk (for debugging ebpf code)")
-    print("\t\t incompatible with offload and may cause unknown behaviour with perf events")
     print("OPTIONAL:")
     print("\t--scan_attempts: Number of scan attempts to infer a Port Scan (Default: 25)")
     print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 1800 sec)")
@@ -78,7 +81,7 @@ def get_detection_mode():
     return d
 
 def get_scan_options(check):
-    sa,sd = 25,1800*10**9 # default values
+    sa,sd = SCAN_ATTEMPTS,SCAN_DELAY # default values
 
     if check == 2 or check == 3:
         if "--scan_attempts" == sys.argv[6]:
@@ -234,22 +237,23 @@ def listen(b,mode,o,offload):
                             d[item["src_ip"]][item["dst_ip"]]["scan_type"]+=[item["portscan_type"]]
 
             except queue.Empty:
-                for k,v in d.items():
-                    print("{} - ALERT . Port Scan detected from {}".format(v["alert_time"],k))
-                    print("{:<34s} |___ Scan Method: {}".format(" ",v["scan_method"]))
-                    for j,i in v.items():
+                for k, v in d.items():
+                    alert_info = "{} - ALERT . Port Scan detected from {}\n".format(v["alert_time"], k)
+                    alert_info += "{:<34s} |___ Scan Method: {}\n".format(" ", v["scan_method"])
+                    for j, i in v.items():
                         if j not in ["scan_method", "alert_time"]:
-                            print("{:<34s} | |___Target IP: {}".format(" ",j))
-                            print("{:<34s} | | |___ Scan Type: {}".format(" ",i["scan_type"]))
+                            alert_info += "{:<34s} | |___Target IP: {}\n".format(" ", j)
+                            alert_info += "{:<34s} | | |___ Scan Type: {}\n".format(" ", i["scan_type"])
                             port_count = len(i["ports"])
-                            ports = [min(i["ports"]),max(i["ports"])]
+                            ports = [min(i["ports"]), max(i["ports"])]
                             if port_count == 1 or ports[0] == ports[1]:
-                                print("{:<34s} | | |___ Scan Attempts: {}".format(" ",port_count))
-                                print("{:<34s} | | |___ Target Port: {}".format(" ",ports[0]))
+                                alert_info += "{:<34s} | | |___ Scan Attempts: {}\n".format(" ", port_count)
+                                alert_info += "{:<34s} | | |___ Target Port: {}\n".format(" ", ports[0])
                             else:
-                                print("{:<34s} | | |___ Scan Attempts: {}".format(" ",port_count))
-                                print("{:<34s} | | |___ Target Ports: [{}-{}]".format(" ",ports[0],ports[1]))
-                            print("{:<34s} | | |___ Duration Time: {}".format(" ",i["last"]-i["start"]))
+                                alert_info += "{:<34s} | | |___ Scan Attempts: {}\n".format(" ", port_count)
+                                alert_info += "{:<34s} | | |___ Target Ports: [{}-{}]\n".format(" ", ports[0], ports[1])
+                            alert_info += "{:<34s} | | |___ Duration Time: {}\n".format(" ", i["last"] - i["start"])
+                print(alert_info)
                 break
 
     def handle_event_data(cpu, data, size):
@@ -284,8 +288,15 @@ def listen(b,mode,o,offload):
                 ("protocol", ctypes.c_uint16),
                 ("padding",ctypes.c_uint16)]
             fk = FLow_key(e.src_ip,e.dst_ip,e.src_port,e.dst_port,e.protocol,ctypes.c_uint16(0))
-            o["flow_table"][fk] = ctypes.c_int(1)
-
+            nonlocal offload_current_table_size
+            if offload_current_table_size != -1 and (offload_current_table_size < offload_max_table_size):
+                o["flow_table"][fk] = ctypes.c_int(0)
+                offload_current_table_size += 1
+                o["counter"][ctypes.c_int(0)] = ctypes.c_int(offload_current_table_size)
+            if(offload_current_table_size != -1 and offload_current_table_size == offload_max_table_size):
+                q_off.put(1)
+                offload_current_table_size = -1
+       
         if mode != 3 and mode != 4: # dont provide any alerts only handle offload events
             return
 
@@ -423,17 +434,54 @@ def listen(b,mode,o,offload):
         time.sleep(1)
         b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
     
+    def restore_offload_table():
+        nonlocal offload_current_table_size
+        while run:
+            value = q_off.get()
+            if value is None:
+                return
+            try:
+                print("\n\nEBPF-IDS:(DEBUG) OFFLOAD MAP IS BEING RESTORED\n")
+                start = time.time()
+                o["flow_table"].clear()
+                o["counter"][ctypes.c_int(0)] = ctypes.c_int(0)
+                end = round((time.time()-start),3)
+                print("\n\nEBPF-IDS:(DEBUG) OFFLOAD MAP RESTORED IN " + str(end) + " SECONDS\n")
+                offload_current_table_size = 0
+            except KeyboardInterrupt:
+                return
+
+    ## kernel
+
+    def kernel_trace_call():
+
+        while run:
+            (task, pid, cpu, flags, ts, msg) = b.trace_fields(nonblocking=True)
+            if(msg is not None):
+                print(msg)
+            time.sleep(0.01)
+            
+    ## main
+
     b["output"].open_perf_buffer(handle_event_data,lost_cb=perf_output_error)
     stored_notifications = {}
     run = True
+    offload_max_table_size = OFFLOADED_MAP_SIZE
+    offload_current_table_size = 0
     q_lost = queue.Queue()
     lost_sample_thread = threading.Thread(target=queue_lost_data)
     lost_sample_thread.start()
+    q_off = queue.Queue()
+    offload_table_thread = threading.Thread(target=restore_offload_table)
+    offload_table_thread.start()
 
+    if mode == 0:
+        wt = threading.Thread(target=kernel_trace_call)
+        wt.start()
     if mode == 1: # flows
         wt = threading.Thread(target=flow_table_call)
         wt.start()
-    elif mode == 2: # portscan table
+    if mode == 2: # portscan table
         wt = threading.Thread(target=port_table_call)
         wt.start()
     if mode == 4:
@@ -442,23 +490,24 @@ def listen(b,mode,o,offload):
         q_thread.start()
     
     try:
-        while True:
-            if mode != 0:
-                b.perf_buffer_poll()
-            else:
-                b.trace_print()
-            
+        while True:     
+            b.perf_buffer_poll()
     except KeyboardInterrupt:
         run = False
         q_lost.put(None)
-        lost_sample_thread.join()
+        q_off.put(None)
         if mode == 4:
             q.put(None)
-            q_thread.join()
-        elif mode == 1 or mode == 2:
-            wt.join()
+        try:
+            lost_sample_thread.join()
+            offload_table_thread.join()
+            if mode == 4:
+                q_thread.join()
+            elif mode == 1 or mode == 2 or mode == 0:
+                wt.join()
+        except KeyboardInterrupt:
+            print("\nFORCE QUITTING (GRACEFULLY EXITING STOPPED THREAHS ARE NOT JOINED)")
         return
-
 
 def main():
 
