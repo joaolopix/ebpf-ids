@@ -249,13 +249,13 @@ static __always_inline int predict_sub_hierachy(flow_key key,int current_flags,i
         }
         else if (key.protocol == IPPROTO_TCP){
             if (current_flags == 121111){ // ack
-                return 2;
+                return 4;
             }
             else if (current_flags == 111121){ // syn
                 return 3;
             }
-            else if (current_flags == 121112){ // fin
-                return 4;
+            else if (current_flags == 111112){ // fin
+                return 2;
             }
         }
         return 5;
@@ -451,11 +451,12 @@ int ebpf_main_tail(struct xdp_md *ctx){
         __u64 rf_pred = value->rf_pred;
 
         if(fv.scan != 0){
-        ps_value psv = {};
-        int event_type = ps_table_add(fk,fv,&psv);
-        event_output(ctx,fk,psv,event_type);
-        if(event_type == 1 && DETECTION_MODE)
-            return XDP_DROP;
+            ps_value psv = {};
+            int event_type = ps_table_add(fk,fv,&psv);
+            event_output(ctx,fk,psv,event_type);
+            if(event_type == 1 && DETECTION_MODE){
+                return XDP_DROP;
+            }
         }
 
         else if(fv.suspicious == 2){

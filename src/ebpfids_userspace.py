@@ -277,7 +277,7 @@ def listen(b,mode,o,offload):
         dst_port = socket.ntohs(e.dst_port)
         src_port = socket.ntohs(e.src_port)
         portscan_method = ["Vertical","Horizontal","Block"]
-        portscan_type = ["","Udp","Fin","Syn","Ack","Scan"]
+        portscan_type = ["","Udp","Fin","Syn","Ack","Unk Scan"]
 
         if e.type == -3: # offload event
             class FLow_key(ctypes.Structure):
@@ -368,7 +368,7 @@ def listen(b,mode,o,offload):
 
     def print_flowtable():
         print("\n\n" + "_"*126 + "\nTable size: "+ str(len(b["flow_table"])) + "\n" + "_"*126)
-        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} '
+        print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<8} | {:<3} '
                 .format("SRC IP", "PORT", "DST IP", "PORT", "PROTO", "PKTS","BYTES","DTIME","FLAGS","SCAN","SCAN PROBABILITY"))
         for k,v in b["flow_table"].items(): 
             src_ip = socket.inet_ntoa(k.src_ip.to_bytes(4, byteorder='little'))
@@ -384,9 +384,9 @@ def listen(b,mode,o,offload):
                 else:
                     fl += '.'
             #scan_to_str = ['yes','no']
-            scan_to_str = ['normal','udp','fin','syn','ack','scan']
+            scan_to_str = ['normal','udp','fin','syn','ack','unk scan']
             scan_prob = math.floor((v.scan_counter/v.packet_counter)*100)
-            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<7} | {:<3} %'
+            print('{:<15s}:{:<6} ---> {:<15s}:{:<6} | {:<6} | {:<6} | {:<6} | {:<8} | {:<6} | {:<8} | {:<3} %'
                     .format(src_ip, src_port, dst_ip, dst_port, k.protocol, v.packet_counter,v.transmited_bytes,round(ts,4),fl,scan_to_str[int(v.scan)],scan_prob))
 
     def print_pstable():
