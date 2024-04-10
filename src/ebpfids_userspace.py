@@ -35,7 +35,7 @@ def usage():
     print("OPTIONAL:")
     print("\t--scan_attempts: Number of scan attempts to infer a Port Scan (Default: 25)")
     print("\t--scan_delay: Max Delay in seconds between scan attempts to infer Port Scan (Default: 1800 sec)")
-    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -Lv\n")
+    print(f"\ne.g.: {sys.argv[0]} -S eth0 -C -P -Lv\n")
 
 def check_input_argv():
     if len(sys.argv) == 6:

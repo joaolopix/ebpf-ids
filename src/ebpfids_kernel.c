@@ -358,8 +358,7 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
     ps_value *value = portscan_table.lookup(&key);
 
     if(value){ 
-
-        if(fv.timestamp - value->timestamp > PS_DELAY){
+        if(fv.timestamp > value->timestamp && fv.timestamp - value->timestamp > PS_DELAY){
             value->dst_ip = fk.dst_ip;
             value->dst_port = fk.dst_port;
             value->timestamp = fv.timestamp;
@@ -367,6 +366,7 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             value->ps_method = 0;
             value->ps_type = fv.scan;
             *psv = *value;
+            bpf_trace_printk("reset");
             return -2;
         }
   
@@ -384,7 +384,6 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
         if(value->ps_counter >= PS_THRESHOLD){
             return 1;
         }
-
     }
     else{
         ps_value new = {};
