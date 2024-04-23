@@ -30,8 +30,13 @@ typedef struct pkt_data {
     bool flags[6];
 }pkt_data;
 
+typedef struct table_state{
+    int count;
+    int ring_buffer;
+} table_state;
+
 BPF_TABLE("hash", flow_key, int, flow_table, TABLE_SIZE);
-BPF_TABLE("array", int, int, counter, 1);
+BPF_TABLE("array", int, table_state, counter, 1);
 
 static __always_inline bool parse_udp(pkt_data *pkt, void *data, void *data_end,__u64 *offset){
 
@@ -159,9 +164,9 @@ int ebpf_main(struct xdp_md *ctx) {
     // ctx->rx_queue_index = 2 the flow table is full, and classifications from offload are not viable until restored
 
     int counter_key = 0;
-    int* table_size = counter.lookup(&counter_key);
-    if(table_size){
-        if(*table_size == TABLE_SIZE){
+    table_state* ts = counter.lookup(&counter_key);
+    if(ts){
+        if(ts->count == TABLE_SIZE || ts->ring_buffer == 1){
             ctx->rx_queue_index = 2;
             return XDP_PASS;
         }

@@ -292,7 +292,10 @@ def listen(b,mode,o,offload):
             if offload_current_table_size != -1 and (offload_current_table_size < offload_max_table_size):
                 o["flow_table"][fk] = ctypes.c_int(0)
                 offload_current_table_size += 1
-                o["counter"][ctypes.c_int(0)] = ctypes.c_int(offload_current_table_size)
+                class Table_State(ctypes.Structure):
+                    _fields_ = [("count", ctypes.c_int),
+                                ("ring_buffer", ctypes.c_int)]
+                o["counter"][ctypes.c_int(0)] = Table_State(offload_current_table_size,0)
             if(offload_current_table_size != -1 and offload_current_table_size == offload_max_table_size):
                 q_off.put(1)
                 offload_current_table_size = -1
@@ -403,10 +406,15 @@ def listen(b,mode,o,offload):
     class Ring_Buffer(ctypes.Structure):
         _fields_ = [("flag", ctypes.c_int),
                     ("lost", ctypes.c_int)]
+    class Table_State(ctypes.Structure):
+        _fields_ = [("count", ctypes.c_int),
+                    ("ring_buffer", ctypes.c_int)]
 
     def perf_output_error(value):
         q_lost.put(value)
         b["event_table"][ctypes.c_int(0)] = Ring_Buffer(0,0) # events cant be generated
+        if offload == 1:
+                o["counter"][ctypes.c_int(0)] = Table_State(offload_current_table_size,1)
     
     def queue_lost_data():
         while run:
@@ -433,6 +441,8 @@ def listen(b,mode,o,offload):
         print("EBPF-IDS: RESTARTING PERF OUTPUT SUBMISSION\n")
         time.sleep(1)
         b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
+        if offload == 1:
+            o["counter"][ctypes.c_int(0)] = Table_State(offload_current_table_size,0)
     
     def restore_offload_table():
         nonlocal offload_current_table_size
@@ -569,7 +579,12 @@ def main():
     class Ring_Buffer(ctypes.Structure):
         _fields_ = [("flag", ctypes.c_int),
                     ("lost", ctypes.c_int)]
+    class Table_State(ctypes.Structure):
+         _fields_ = [("count", ctypes.c_int),
+                     ("ring_buffer", ctypes.c_int)]
     b["event_table"][ctypes.c_int(0)] = Ring_Buffer(1,0) # events can be generated
+    if(offloaded_device is not None):
+        o["counter"][ctypes.c_int(0)] = Table_State(0,0) # events can be generated
    
     b.attach_xdp(device, fn, flags)
     print("EBPF-IDS: XDP ATTACHED\n")

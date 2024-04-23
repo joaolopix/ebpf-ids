@@ -479,7 +479,7 @@ int ebpf_main(struct xdp_md *ctx) {
 
     pkt_data pkt = {};
     __u64 rf_pred = ctx->rx_queue_index;
-    
+  
     if(!packet_parser(&pkt,data,data_end))
         return XDP_PASS;
  
