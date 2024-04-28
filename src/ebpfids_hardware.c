@@ -159,14 +159,14 @@ static __always_inline int calculate_flags(pkt_data *pkt){
 
 int ebpf_main(struct xdp_md *ctx) {
 
-    // ctx->rx_queue_index = 0 indicates that either the packet was not processed or is begnin
+    // ctx->rx_queue_index = 0 indicates that either the packet was not processed, is begnin or belongs to active flow
     // ctx->rx_queue_index = 1 the packet is a portscan
-    // ctx->rx_queue_index = 2 the flow table is full, and classifications from offload are not viable until restored
+    // ctx->rx_queue_index = 2 the flow table is full or perf output overflow, and classifications from offload are not viable until restored
 
     int counter_key = 0;
     table_state* ts = counter.lookup(&counter_key);
     if(ts){
-        if(ts->count == TABLE_SIZE || ts->ring_buffer == 1){
+        if(ts->count == TABLE_SIZE){
             ctx->rx_queue_index = 2;
             return XDP_PASS;
         }
@@ -184,6 +184,12 @@ int ebpf_main(struct xdp_md *ctx) {
     int* value = flow_table.lookup(&key);
     if(value)
        return XDP_PASS;
+    else if(ts){
+        if(ts->ring_buffer == 1){
+            ctx->rx_queue_index = 2;
+            return XDP_PASS;
+        }
+    }
     
     int current_flags = calculate_flags(&pkt);
     int rf_pred = predict_C(0,pkt.l4_proto,1,pkt.pkt_len,current_flags);

@@ -366,7 +366,6 @@ static __always_inline int ps_table_add(flow_key fk, flow_value fv, ps_value *ps
             value->ps_method = 0;
             value->ps_type = fv.scan;
             *psv = *value;
-            bpf_trace_printk("reset");
             return -2;
         }
   
@@ -463,7 +462,7 @@ int ebpf_main_tail(struct xdp_md *ctx){
             event_output(ctx,fk,(ps_value){},-1);
         }
 
-        if(OFFLOAD_MODE && (fv.packet_counter==2 || (fv.packet_counter>10 && rf_pred == 1))){
+        if(OFFLOAD_MODE && (fv.packet_counter==2 || (fv.packet_counter%10==0 && rf_pred == 1))){
             // if the flow is active send event, if after a while offloading is still sending market packets, resend event, maybe was lost
             event_output(ctx,fk,(ps_value){},-3);
         }
