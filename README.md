@@ -5,7 +5,7 @@ This repository contains the source code and other materials for an Intrusion De
 This work was developed in the context of the Thesis related to Masters in Informatics Security, presented to the Department of Informatics Engineering of the Faculty of Sciences and Technology of the University of Coimbra.
 
 ## Contents
-For the correct functionality of this solution, the following are required:
+This repository contains:
 * A solution before XDP Offload was integrated, used for legacy purposes
 * Dataset processing and Machine Learning Training
 * The Source Code containing the final solution
