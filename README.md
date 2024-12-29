@@ -2,7 +2,10 @@
 
 This repository contains the source code and other materials for an Intrusion Detection System developed using the extended Berkeley Packet Filter. It uses Machine Learning, namely a Random Forest algorithm, for detection. Additionally, the solution can use a partial hardware offload using the XDP Offload mode. This solution is designed solely for the detection of Port Scans.
 
-This work was developed in the context of the Thesis related to Masters in Informatics Security, presented to the Department of Informatics Engineering of the Faculty of Sciences and Technology of the University of Coimbra.
+This work was developed in the context of the Thesis related to Masters in Informatics Security, presented to the Department of Informatics Engineering of the Faculty of Sciences and Technology of the University of Coimbra. Additionally, from this work a scientific paper was produced and presented at NFV-SDN Conference.
+
+* Thesis: https://estudogeral.uc.pt/handle/10316/116520
+* Paper: https://ieeexplore.ieee.org/document/10807487
 
 ## Contents
 This repository contains:
